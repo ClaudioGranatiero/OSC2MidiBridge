@@ -1,4 +1,4 @@
-$rev R1 ; Firmware 1.10; BC Manager 3.0.0
+﻿$rev R1 ; Firmware 1.10; BC Manager 3.0.0
 $global
   .midimode U-4
   .startup last
@@ -257,11 +257,11 @@ $encoder 40
   .default 0
 $encoder 41 ;*GUASTO*
 ;~color=black
+  .easypar CC 3 1 0 127 absolute
   .showvalue off
-  .mode off
+  .mode 1dot/off
   .resolution 96 96 96 96
   .default 0
-  .minmax 0 0
 $encoder 42
   .easypar CC 3 2 0 127 absolute
   .showvalue off
