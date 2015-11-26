@@ -3,6 +3,7 @@
 
 """
 History:
+    2015-11-26: 0.0.8: status leds on BCR2000; offline values from BCR; FX return level
     2015-11-25: 0.0.7: tests, fixes and offline loading of non active bank; FX parameters Shift
     2015-11-24: 0.0.6: Bank Switch
     2015-11-23: 0.0.5: refactoring; english translation
@@ -11,7 +12,7 @@ History:
     2015-11-21: 0.0.2: refactoring, configuration file
     2015-11-20: 0.0.1: first working version; FX parameters
 """
-VERSION="0.0.7"
+VERSION="0.0.8"
 
 import rtmidi_python as rtmidi
 import time
@@ -24,6 +25,7 @@ if os.name == 'nt':
 #from ConfigParser import SafeConfigParser,ConfigParser
 import ConfigParser
 import ast
+import string
 
 ### Some global variables ###
 LastMidiEvent=0
@@ -33,8 +35,11 @@ DebugMIDIsend=0
 DebugMIDIrecv=0
 Bank=0
 FxShift=0
+Stat=0
+VoiceChannel=0
 do_exit=False
 FxType=[0,0,0,0]
+FxReturn=[0,0,0,0]
 Volume=[
         [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16],
         [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16],
@@ -44,10 +49,10 @@ Pan=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]
 Mute=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]
 Solo=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]
 FxParVal=[
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16],
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16],
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16],
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]
+            [['i',1],['i',2],['i',3],['i',4],['i',5],['i',6],['i',7],['i',8],['i',9],['i',10],['i',11],['i',12],['i',13],['i',14],['i',15],['i',16]],
+            [['i',1],['i',2],['i',3],['i',4],['i',5],['i',6],['i',7],['i',8],['i',9],['i',10],['i',11],['i',12],['i',13],['i',14],['i',15],['i',16]],
+            [['i',1],['i',2],['i',3],['i',4],['i',5],['i',6],['i',7],['i',8],['i',9],['i',10],['i',11],['i',12],['i',13],['i',14],['i',15],['i',16]],
+            [['i',1],['i',2],['i',3],['i',4],['i',5],['i',6],['i',7],['i',8],['i',9],['i',10],['i',11],['i',12],['i',13],['i',14],['i',15],['i',16]],
          ]
 
 
@@ -168,6 +173,7 @@ if parser.read('osc2midi.ini') != None:
         ReloadBus2Levels=ReadConfig('OSC2Midi','ReloadBus2Levels','bool')    
         ReloadFxType=ReadConfig('OSC2Midi','ReloadFxType','bool')
         ReloadFxParams=ReadConfig('OSC2Midi','ReloadFxParams','bool')
+        NoReload=ReadConfig('OSC2Midi','NoReload','bool')
         MidiMode=ReadConfig('MIDI','Mode')
 
     except ConfigParser.NoSectionError,err:
@@ -238,7 +244,8 @@ def Reload(client,force=False):
             if DebugOSCsend > 0:
                 print "OSCsend: /fx/%d/type" % i
             #oscsend("/fx/%d/type" % i)
-            client.send(OSC.OSCMessage("/fx/%d/type" % i)) # FX
+            client.send(OSC.OSCMessage("/fx/%d/type" % i)) # FX type
+            client.send(OSC.OSCMessage("/rtn/%d/mix/fader" % i)) # FX return level            
             time.sleep(WAITOSC)
     
     for i in range(1,17): 
@@ -246,6 +253,8 @@ def Reload(client,force=False):
         if ReloadMasterLevels:
             #oscsend("/ch/0%d/mix/fader" % i)
             client.send(OSC.OSCMessage("/ch/%02d/mix/fader" % i)) # Master LR
+            time.sleep(WAITOSC)
+            client.send(OSC.OSCMessage("/ch/%02d/config/name" % i))
             time.sleep(WAITOSC)
 
         # Mute
@@ -277,17 +286,18 @@ def Reload(client,force=False):
             client.send(OSC.OSCMessage("/ch/%02d/mix/02/level" % i)) # Phones 2 (Bus2)
             #oscsend("/ch/0%d/mix/02/level" % i) # Phones 2 (Bus2)
             time.sleep(WAITOSC)
-    
     # FX parameters for the currently selected slot.
     # CurrentFX is the currently selected slot (we can select 1 of 4 different slots with the 4 "User defined" buttons on BCR2000)
     if ReloadFxParams:
-        for i in FxParam[FxType[CurrentFx-1]]: # here we take the list of parameters for this type of effect loaded in the current slot
-            if DebugOSCsend > 0:
-                print "OSCsend: /fx/%d/par/%02d" % (CurrentFx,i)
-            client.send(OSC.OSCMessage("/fx/%d/par/%02d" % (CurrentFx,i))) # FX parameters
-            #oscsend("/fx/%d/par/%02d" % (CurrentFx,i)) # FX parameters
-            time.sleep(WAITOSC)
-
+        for j in range(1,5):
+#        for i in FxParam[FxType[CurrentFx-1]]: # here we take the list of parameters for this type of effect loaded in the current slot
+            for i in FxParam[FxType[j-1]]:
+                if DebugOSCsend > 0:
+                    print "OSCsend: /fx/%d/par/%02d" % (j,i)
+                client.send(OSC.OSCMessage("/fx/%d/par/%02d" % (j,i))) # FX parameters
+                #oscsend("/fx/%d/par/%02d" % (CurrentFx,i)) # FX parameters
+                time.sleep(WAITOSC)
+                
 def request_notifications(client):
     """
     Sends /xremote repeatedly to mixing desk to make sure changes are transmitted to our server; take care of user interaction; calls Reload.
@@ -319,28 +329,31 @@ def request_notifications(client):
                     DebugOSCrecv=0
                     DebugMIDIsend=0
                     DebugMIDIrecv=0
+                    status()
                 if ch == 'h':
                     help()
                 if ch == 's':
                     status()
-
                 if ch == 'n':
                     NoReload=True
+                    status()
                 if ch == 'r':
                     NoReload=False
+                    status()
                 if ch == 'o':
                     DebugOSCsend+=1
-                    print "Debug=",DebugOSCsend,DebugOSCrecv,DebugMIDIsend,DebugMIDIrecv                    
+                    status()
                 if ch == 'O':
                     DebugOSCrecv+=1
-                    print "Debug=",DebugOSCsend,DebugOSCrecv,DebugMIDIsend,DebugMIDIrecv                    
+                    status()
                 if ch == 'm':
                     DebugMIDIsend+=1
-                    print "Debug=",DebugOSCsend,DebugOSCrecv,DebugMIDIsend,DebugMIDIrecv                    
+                    status()
                 if ch == 'M':
                     DebugMIDIrecv+=1
-                    print "Debug=",DebugOSCsend,DebugOSCrecv,DebugMIDIsend,DebugMIDIrecv
-
+                    status()
+                if ch == 'R':
+                    Reload(client,True)
     exit()
 def help():
     print "h - this help page"
@@ -348,6 +361,7 @@ def help():
     print "q - quiet: ends debug informations"
     print "n - set to NoReload Mode"
     print "r - set to Reload Mode"
+    print "R - Reload NOW!"
     print "o - increment DebugOSCsend"
     print "O - increment DebugOSCrecv"
     print "m - increment DebugMIDIsend"
@@ -356,48 +370,83 @@ def help():
     print "-------------------------------------------------"
 
 def status():
+    print "-------------------------------"
     print "Status:"
+    print "Debug: OSCsend=%d, OSCrecv=%d, MIDIsend=%d, MIDIrecv=%d" % (DebugOSCsend,DebugOSCrecv,DebugMIDIsend,DebugMIDIrecv)
+    print "NoReload=%d" % NoReload
+    print "VoiceChannel=%d" % VoiceChannel
+    print "CurrentFx=%d" % CurrentFx
+    print "Bank=%d" % Bank
+    print "-------------------------------"
     # TO BE CONTINUED...
+
+def Progress(incremento=127/15):
+    global Stat
+    midi_out.send_message([0xB2,1,int(Stat)])
+    Stat += incremento
+    if Stat > 127:
+        Stat = 127/15
+    if Stat <= 0:
+        Stat = 127
+    if do_exit != True:
+        threading.Timer(1,Progress,()).start()
+
     
 def parse_messages():
     """
     Starts the OSC msg_handler thread and initialize bidirectional connection with XR18 via OSC.
     """
-    global LastMidiEvent
-    global FxType
-    global CurrentFx
-    global FxParam
-    global Volume
-    global Pan
-    global Mute
-    global Solo
-    global FxParVal
+
+ 
 
 
     def msg_handler(addr, tags, data, client_address):
         """
         Parses the received OSC messages, sends corresponding values to Midi. Ignore non pertinent messages.
         """
-
+        global VoiceChannel
+        global LastMidiEvent
+        global FxType
+        global CurrentFx
+        global FxParam
+        global Volume
+        global Pan
+        global Mute
+        global Solo
+        global FxParVal
+        global FxReturn        
         if time.time() - LastMidiEvent > WAITMIDI: # we are parsing OSC messages only if a consistent time is passed from the last Midi event
             if DebugOSCrecv > 0:
                 print 'OSCMessage("%s",%s,%s)' % (addr, tags, data)
-                if tags == 'f':
-                    print "Float!"
-                if data[0] != data[0]:
-                    print "NaN!"
+##                if tags == 'f':
+##                    print "Float!"
+##                if data[0] != data[0]:
+##                    print "NaN!"
   
             if data[0] != data[0]:
                 data[0]=0
 
-            val=int(data[0]*127)  # for the moment we take alla parameters value as "float". TO BE FIXED!
+            val=0
+            if tags == 'f':
+                val=int(data[0]*127)
+            if tags == 'i':
+                val=int(data[0])
+                
             # FX type (es.: "/fx/1/type")
             if re.match("/fx/./type",addr):
                 slot=int(addr[4]) # addr[4] is the FX (1 to 4)
                 FxType[slot-1]=data[0] 
                 if DebugOSCrecv > 0:
                     print "Found FX %d set to %d" % (slot,FxType[slot-1])
-            
+                    
+            elif re.match("/ch/../config/name",addr):
+                channel=int(addr[4:6])
+                name=data[0]
+                if DebugOSCrecv > 0: print "Channel %d is named %s" %(channel,name)
+                if name.lower() in ("voce","voce1","vox","vox1","voice","voice1"):
+                    if DebugOSCrecv > 0: print "VoiceChannel=%d" % channel
+                    VoiceChannel=channel
+                    
             elif re.match("/ch/../mix/0./level",addr): # Bus Sends
                   val=int(data[0]*127)
                   channel=int(addr[4:6])
@@ -430,13 +479,19 @@ def parse_messages():
             elif re.match("/fx/./par/..",addr): 
                 slot=int(addr[4])
                 par=int(addr[10:12])
-                val=int(data[0]*127)
+                
+                if tags == 'f':
+                    val=int(data[0]*127)
+                if tags == 'i':
+                    val=int(data[0])
+
+                FxParVal[slot-1][par-1][0]=tags
+                FxParVal[slot-1][par-1][1]=val
                 if slot == CurrentFx: #  here we are
-                    index=2+FxParam[FxType[slot-1]].index(par)-7*FxShift
-                    if index >=2 and index <= 8:
+                    index=2+FxParam[FxType[slot-1]].index(par)-6*FxShift
+                    if index >=2 and index <= 7:
                         # ie: slot=2, FxType[1]=11, CurrentFx=2, FxParam[11]=[1,4,5,6,7,9,2], par=9 -> send(0xB2,6,val)
                         try:
-                            FxParVal[slot-1][par-1]=val
                             if MidiMode == 'BCR':
                                 midi_out.send_message([0xB2,index,val]) #MIDI ch. 3 NB: in my BCR fx params starts from CC2 (CC1 is faulty!)
                             elif MidiMode == 'MCU':
@@ -446,6 +501,23 @@ def parse_messages():
          
                 if DebugOSCrecv > 0:
                     print "FX: current=%d - slot=%d - par=%d - val=%f" %(CurrentFx,slot,par,data[0])
+
+            # Fx Return Levels
+            elif re.match("/rtn/./mix/fader",addr):
+                slot=int(addr[5])
+                val=int(data[0]*127)
+                FxReturn[slot-1]=val
+         
+                if DebugOSCrecv > 0:
+                    print "FX return: current=%d - slot=%d - val=%f" %(CurrentFx,slot,val)
+                
+                if slot == CurrentFx:
+                    if MidiMode == 'BCR':
+                        midi_out.send_message([0xB2,8,val])
+                    elif MidiMode == 'MCU':
+                        pass # Not Yet Implemented
+
+                
 
             # Mixer Channels (es: "/ch/01/mix/03")
             elif re.match("/ch/../mix/fader",addr): # Volume Master
@@ -584,16 +656,19 @@ def RefreshBCR():
 
 def RefreshBCRfx():
     #print FxParVal[CurrentFx-1]
-    for i in range(0,14):
+    for i in range(0,12):
         index=FxParam[FxType[CurrentFx-1]].index(FxParam[CurrentFx-1][i])
-        #print "i=%d, index=%d, val=%d" % (i,index,FxParVal[CurrentFx-1][i])
-        if index >= 7*FxShift and index <= 6+7*FxShift:
+        tag=FxParVal[CurrentFx-1][i][0]
+        val=FxParVal[CurrentFx-1][i][1]
+        if DebugOSCrecv > 1: print "i=%d, index=%d, val=%d (%c)" % (i,index,val,tag)
+        if index >= 6*FxShift and index <= 5+6*FxShift:
             if MidiMode == 'BCR':
-                midi_out.send_message([0xB2,2+index-7*FxShift,FxParVal[CurrentFx-1][i]]) #MIDI ch. 3 NB: in my BCR fx params starts from CC2 (CC1 is faulty!)
-                #print "Midi send: CC=%d, val=%d, FxShift=%d" % (2+index-7*FxShift,FxParVal[CurrentFx-1][i],FxShift)
+                midi_out.send_message([0xB2,2+index-6*FxShift,val]) #MIDI ch. 3 NB: in my BCR fx params starts from CC2 (CC1 is faulty!)
+                if DebugMIDIsend > 0: print "Midi send: CC=%d, val=%d, FxShift=%d" % (2+index-7*FxShift,val,FxShift)
             elif MidiMode == 'MCU':
                 pass # Not Yet Implemented
-        
+    midi_out.send_message([0xB2,8,FxReturn[CurrentFx-1]]) #MIDI ch. 3 NB: in my BCR fx params starts from CC2 (CC1 is faulty!)
+    if DebugOSCrecv > 1: print "(get) Fx %d return level: %d" % (CurrentFx, FxReturn[CurrentFx-1])    
 
 
 
@@ -607,6 +682,13 @@ def MidiCallback(message, time_stamp):
     global CurrentFx
     global Bank
     global FxShift
+    global Volume
+    global Pan
+    global Mute
+    global Solo
+    global FxParVal
+    global FxReturn
+    
     cc=0
     val=0
     address=""
@@ -626,20 +708,23 @@ def MidiCallback(message, time_stamp):
         if MidiChannel == 1: # Master LR Volume
             if cc >= 1 and cc <= 8: 
                 address="/ch/%02d/mix/fader" % (cc+8*Bank)
+                Volume[0][cc+8*Bank-1]=val
             if cc >= 9 and cc <= 16: # Group 2 of Encoders: Pan
                 address="/ch/%02d/mix/pan" % (cc-8+8*Bank)
+                Pan[cc-8+8*Bank-1]=val
             if cc >= 65 and cc <= 72: # first row buttons: Solo
                 address="/-stat/solosw/%02d" % (cc-64+8*Bank)
+                Solo[cc-64+8*Bank-1]=val
             elif cc >= 73 and cc <= 80: # second row buttons: Mute
                 address="/ch/%02d/mix/on" % (cc-72+8*Bank)
                 if val > 0: val=0
                 else: val=127
+                Mute[cc-72+8*Bank-1]=val
 
                     
             # 81,82,83,84 are the User Defined buttons: they select the current FX
             if cc >= 81 and cc <=84:
                 CurrentFx=cc-80
-
                     
                 # these buttons should be exclusively selectable (selecting one deselect the others)
                 for i in range(81,85):
@@ -676,20 +761,30 @@ def MidiCallback(message, time_stamp):
         if MidiChannel == 2: # Livelli Bus1
             if cc >= 1 and cc <= 8:
                 address="/ch/%02d/mix/01/level" % (cc+8*Bank)
+                Volume[1][cc+8*Bank-1]=val
 
 ####  MIDI Channel 3 ####
         if MidiChannel == 3: # Parametri FX corrente
            if cc == 1:
                   print "Faulty Controller!"
-           if cc >= 2 and cc <= 9:
-                address="/fx/%d/par/%02d" %(CurrentFx,FxParam[FxType[CurrentFx-1]][cc-2+7*FxShift]) #NB: FxType[CurrentFX-1] is the Parameters List of the currently selected FX slot
+           if cc >= 2 and cc <= 7:
+                par=FxParam[FxType[CurrentFx-1]][cc-2+6*FxShift]
+                address="/fx/%d/par/%02d" %(CurrentFx,par) #NB: FxType[CurrentFX-1] is the Parameters List of the currently selected FX slot
                                                                                        # cc-2 is the index in the array we are changing
                 # ie: if Type is 11, the row is [1,4,5,6,7,9,2]. If CC is 3, we take the parameter at offset "1" (CC-2), that is "4"
+                FxParVal[CurrentFx-1][par-1][1]=val
+           if cc == 8:
+               address="/rtn/%d/mix/fader" % CurrentFx
+               print "(set) Fx %d return level: %d" % (CurrentFx, val)
+               FxReturn[CurrentFx-1]=val
+
+
 
 ####  MIDI Channel 4 ####
         if MidiChannel == 4: # Livelli Bus2
             if cc >= 1 and cc <= 8:
                 address="/ch/%02d/mix/02/level" % (cc+8*Bank)
+                Volume[2][cc+8*Bank-1]=val
 
 ####  MIDI Channel 16 ####
         if MidiChannel == 16: # FCB1010
@@ -698,7 +793,7 @@ def MidiCallback(message, time_stamp):
             if cc == 101: # expression A
                 if DebugMIDIrecv > 1:
                     print "Exp A"
-                address="/ch/03/mix/08/level" # voce -> FX2 # *** QUESTO E' DA RIVEDERE!! ***
+                address="/ch/%02d/mix/08/level" % VoiceChannel# voce -> FX2 # *** QUESTO E' DA RIVEDERE!! ***
 
             if cc == 102: # expression B
                 if DebugMIDIrecv > 1:
@@ -755,5 +850,8 @@ midi_out.send_message([0xB0,83,0])   #MIDI ch. 1, CC83, off
 midi_out.send_message([0xB0,84,0])   #MIDI ch. 1, CC84, off
 midi_out.send_message([0xB0,80+CurrentFx,127]) #MIDI ch. 1, CC81, on (se CurrentFx = 1)
 midi_out.send_message([0xB0,85,0])   # Bank status
+
+threading.Timer(1,Progress,()).start()
+
 parse_messages()
 
