@@ -3,7 +3,7 @@
 
 """
 History:
-    2015-11-27: 0.0.10: Fx Sends in PushEncoders Group 3
+    2015-11-27: 0.0.10: Fx Sends in PushEncoders Group 3; interpolation
     2015-11-26: 0.0.9: Fx/Aux Return Level in Bank2
     2015-11-26: 0.0.8: status leds on BCR2000; offline values from BCR; FX return level
     2015-11-25: 0.0.7: tests, fixes and offline loading of non active bank; FX parameters Shift
@@ -42,12 +42,12 @@ FlipFlop=0
 VoiceChannel=0
 do_exit=False
 FxType=[0,0,0,0]
-FxReturn=[
-            [0,0,0,0,0],
-            [0,0,0,0,0],
-            [0,0,0,0,0]
+FxReturn=[ #Fx1, Fx2, Fx3, Fx4, Aux
+            [0,0,0,0,0], # Master
+            [0,0,0,0,0], # Bus1
+            [0,0,0,0,0]  # Bus2
         ]
-Volume=[
+Volume=[ # 16 channels
         [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16], # Main LR
         [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16], # Bus1
         [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16], # Bus2
@@ -56,20 +56,21 @@ Volume=[
         [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16], # Fx3
         [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16], # Fx4
        ]
-Pan=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]
+Pan=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16] # 16 channels
 Mute=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]
 Solo=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]
-FxParVal=[
-            [['i',1],['i',2],['i',3],['i',4],['i',5],['i',6],['i',7],['i',8],['i',9],['i',10],['i',11],['i',12],['i',13],['i',14],['i',15],['i',16]],
-            [['i',1],['i',2],['i',3],['i',4],['i',5],['i',6],['i',7],['i',8],['i',9],['i',10],['i',11],['i',12],['i',13],['i',14],['i',15],['i',16]],
-            [['i',1],['i',2],['i',3],['i',4],['i',5],['i',6],['i',7],['i',8],['i',9],['i',10],['i',11],['i',12],['i',13],['i',14],['i',15],['i',16]],
-            [['i',1],['i',2],['i',3],['i',4],['i',5],['i',6],['i',7],['i',8],['i',9],['i',10],['i',11],['i',12],['i',13],['i',14],['i',15],['i',16]],
+FxParVal=[ # [type, value] for 16 parameters
+            [['i',1],['i',2],['i',3],['i',4],['i',5],['i',6],['i',7],['i',8],['i',9],['i',10],['i',11],['i',12],['i',13],['i',14],['i',15],['i',16]], # Fx1
+            [['i',1],['i',2],['i',3],['i',4],['i',5],['i',6],['i',7],['i',8],['i',9],['i',10],['i',11],['i',12],['i',13],['i',14],['i',15],['i',16]], # Fx2
+            [['i',1],['i',2],['i',3],['i',4],['i',5],['i',6],['i',7],['i',8],['i',9],['i',10],['i',11],['i',12],['i',13],['i',14],['i',15],['i',16]], # Fx3
+            [['i',1],['i',2],['i',3],['i',4],['i',5],['i',6],['i',7],['i',8],['i',9],['i',10],['i',11],['i',12],['i',13],['i',14],['i',15],['i',16]], # Fx4
          ]
 
 
 
 ### Some safe defaults (overloaded in config file)
 MIDINAME="BCR2000 port 1"
+MIDINAME2="None"
 #MIDINAME="BCR2000"
 #MIDINAME="iCON iControls_Pro V1.02 Porta 1"
 MidiMode='BCR'
@@ -99,12 +100,12 @@ ReloadFxParams=True
 #   is OSC parameter 1. Controller 1 (CC3) is OSC parameter 4, and so on.
 # NB: all values are considered as float! This is not the real situation, some parameters have integer values!! TO BE FIXED!!!
 FxParam=[
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #00 Hall Reverb
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #01 Ambience Reverb
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #02 Rich Plate Reverb
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #03 Room Reverb
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #04 Chamber Reverb
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #05 Plate Reverb
+            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #00 Hall Reverb - 1: PreDelay, 2:Decay, 3:Size, 4: Damping, 5: Diffuse, 6: Level, 7: LoCut, 8: HiCut, 9: BassMulti, 10: Spread, 11: Shape, 12: ModSpeed
+            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #01 Ambience Reverb - 1: PreDelay, 2:Decay, 3:Size, 4: Damping, 5: Diffuse, 6: Level, 7: LoCut, 8: HiCut, 9: Modulate, 10: TailGain
+            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #02 Rich Plate Reverb - 1: PreDelay, 2:Decay, 3:Size, 4: Damping, 5: Diffuse, 6: Level, 7: LoCut, 8: HiCut, 9: BassMulti, 10: Spread, 11: Attack, 12: Spin, 13: EchoL, 14: EchoR, 15: EchoFeedL, 16: EchoFeedR
+            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #03 Room Reverb - 1: PreDelay, 2:Decay, 3:Size, 4: Damping, 5: Diffuse, 6: Level, 7: LoCut, 8: HiCut, 9: BassMulti, 10: Spread, 11: Attack, 12: Spin, 13: EchoL, 14: EchoR, 15: EchoFeedL, 16: EchoFeedR
+            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #04 Chamber Reverb - 1: PreDelay, 2:Decay, 3:Size, 4: Damping, 5: Diffuse, 6: Level, 7: LoCut, 8: HiCut, 9: BassMulti, 10: Spread, 11: Attack, 12: Spin, 13: ReflectionL, 14: ReflectionR, 15: ReflectionGainL, 16: ReflectionGainR
+            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #05 Plate Reverb - 1: PreDelay, 2:Decay, 3:Size, 4: Damping, 5: Diffuse, 6: Level, 7: LoCut, 8: HiCut, 9: BassMulti, 10: XOver, 11: Mod, 12: ModSpeed
             [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #06 Vintage Reverb
             [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #07 Vintage Room
             [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #08 Gated Reverb
@@ -168,6 +169,7 @@ parser = ConfigParser.SafeConfigParser()
 if parser.read('osc2midi.ini') != None:
     try:
         MIDINAME=ReadConfig('MIDI', 'DeviceName')
+        MIDINAME2=ReadConfig('MIDI', 'DeviceName2')
         ADDR=ReadConfig('OSC', 'Address')
         PORT_SRV=ReadConfig('OSC', 'ServerPort','int')
         PORT_CLN=ReadConfig('OSC', 'ClientPort','int')
@@ -236,7 +238,19 @@ Esempio di "osc2midi.ini":
 
 """
 
+def interpolate(value, inMin, inMax, outMin, outMax):
+    """
+    map the value, originally in range (inMin, inMax), to proportional value in range (outMin,outMax)
+    """
+    # Figure out how 'wide' each range is
+    inSpan = inMax - inMin
+    outSpan = outMax - outMin
 
+    # Convert the in range into a 0-1 range (float)
+    valueScaled = float(value - inMin) / float(inSpan)
+
+    # Convert the 0-1 range into a value in the out range.
+    return outMin + (valueScaled * outSpan)
 
 def Reload(client,force=False):
     """
@@ -400,6 +414,10 @@ def status():
     # TO BE CONTINUED...
 
 def Progress(incremento=127/15):
+    """
+    Show a moving led on MidiChannel3, CC1 (it's a faulty rotary controller on my BCR2000), 
+    then update status of ledbutton in MidiChannel1,CC85 (Bank Select): Off=Bank0, On=Bank1, Blink=Bank2
+    """
     global Stat
     global FlipFlop
     midi_out.send_message([0xB2,1,int(Stat)])
@@ -424,9 +442,6 @@ def parse_messages():
     Starts the OSC msg_handler thread and initialize bidirectional connection with XR18 via OSC.
     """
 
- 
-
-
     def msg_handler(addr, tags, data, client_address):
         """
         Parses the received OSC messages, sends corresponding values to Midi. Ignore non pertinent messages.
@@ -445,12 +460,8 @@ def parse_messages():
         if time.time() - LastMidiEvent > WAITMIDI: # we are parsing OSC messages only if a consistent time is passed from the last Midi event
             if DebugOSCrecv > 0:
                 print 'OSCMessage("%s",%s,%s)' % (addr, tags, data)
-##                if tags == 'f':
-##                    print "Float!"
-##                if data[0] != data[0]:
-##                    print "NaN!"
   
-            if data[0] != data[0]:
+            if data[0] != data[0]: # take care of the "NaN" situation
                 data[0]=0
 
             val=0
@@ -466,6 +477,8 @@ def parse_messages():
                 if DebugOSCrecv > 0:
                     print "Found FX %d set to %d" % (slot,FxType[slot-1])
                     
+            # We need to know which channel is the Main Vocal, so we can map the Expression Pedal (on FCB1010)
+            # to the right Send for Fx.
             elif re.match("/ch/../config/name",addr):
                 channel=int(addr[4:6])
                 name=data[0]
@@ -475,7 +488,7 @@ def parse_messages():
                     VoiceChannel=channel
                     
             elif re.match("/ch/../mix/../level",addr): # Bus Sends
-                #          012345678901234567
+            # The busses 7-10 are the Fx Return Busses
                   val=int(data[0]*127)
                   channel=int(addr[4:6])
                   bus=int(addr[11:13])
@@ -627,7 +640,7 @@ def parse_messages():
                             midi_out.send_message([0xDF+channel-8*Bank,val,val])
                             midi_out.send_message([0x90,0x67+channel-8*Bank,0])
                     
-            elif re.match("/ch/0./mix/pan",addr): # Pan Master
+            elif re.match("/ch/../mix/pan",addr): # Pan Master
                 channel=int(addr[4:6])
                 val=int(data[0]*127)
                 if channel >= 1 and channel <= 16:
@@ -719,16 +732,16 @@ def oscsend(address, value=None):
 """
 *** BCR2000 implementation chart ***
 Midi Channel 1: volume bus Master LR
-    CC 1-8 -> /ch/0<CC>/mix/fader
+    CC 1-8 -> /ch/<CC>/mix/fader
 
 Midi Channel 2: sends Bus1 (Phones1)
-    CC 1-8 -> /ch/0<CC>/mix/01/fader
+    CC 1-8 -> /ch/<CC>/mix/01/fader
 
 Midi Channel 3: Current FX parameters
     CC 2-8 -> /fx/<CurrentFx>/par/<PAR>
 
 Midi Channel 4: sends Bus2 (Phones2)
-    CC 1-8 -> /ch/0<CC>/mix/02/fader
+    CC 1-8 -> /ch/<CC>/mix/02/fader
 
 Midi Channel 16: FCB1010 - voice strip (3) -> FX2 return level
     CC 101 -> /ch/03/mix/08/level # FX2 send (Voice)
@@ -795,6 +808,7 @@ def MidiCallback(message, time_stamp):
     val=0
     address=""
     MidiChannel=0
+    interpolation=None
 
     if int(message[0]) >= 0xB0 and int(message[0]) <= 0xBF: # at the moment we'll process only ContinousControls (CC).
         LastMidiEvent=time.time()
@@ -926,6 +940,7 @@ def MidiCallback(message, time_stamp):
                 if DebugMIDIrecv > 1:
                     print "Exp A"
                 address="/ch/%02d/mix/08/level" % VoiceChannel# voce -> FX2 # *** QUESTO E' DA RIVEDERE!! ***
+                interpolation=(0.2,0.8)
 
             if cc == 102: # expression B
                 if DebugMIDIrecv > 1:
@@ -936,12 +951,15 @@ def MidiCallback(message, time_stamp):
 # Ok, if we have an address, we can send an OSC message:
     if address != "":
         try:
-            oscsend(address,float(val)/127)
+            if interpolation != None:
+                oscsend(address,interpolate(float(val)/127,0,1.0,interpolation[0],interpolation[1]))
+	    else:
+                oscsend(address,float(val)/127)
         except:
             oscsend(address,int(val))
         #client.send(OSC.OSCMessage(address).append(float(val)/127))
         
-def OpenMidiPort(midi_port, descr="Devices"):
+def OpenMidiPort(name,midi_port, descr="Devices"):
     """
     Helper function to open midi device
     """
@@ -949,7 +967,7 @@ def OpenMidiPort(midi_port, descr="Devices"):
     port=-1
     print "MIDI %s:" % descr
     for port_name in midi_port.ports:
-        if port_name.find(MIDINAME) != -1:
+        if port_name.find(name) != -1:
             port=i
             print "    ",i,": * ",port_name," *"
         else:
@@ -957,20 +975,31 @@ def OpenMidiPort(midi_port, descr="Devices"):
         i=i+1
         
     if port == -1:
-        print "Device "+MIDINAME+" not found in Midi %s. Aborting." % descr
+        print "Device "+name+" not found in Midi %s. Aborting." % descr
         exit()
     return(port)
 
 
 midi_in=rtmidi.MidiIn()
-port_in=OpenMidiPort(midi_in,"Input Devices")
+port_in=OpenMidiPort(MIDINAME,midi_in,"Input Devices")
 midi_out=rtmidi.MidiOut()
-port_out=OpenMidiPort(midi_out,"Output Devices")
+port_out=OpenMidiPort(MIDINAME,midi_out,"Output Devices")
 
 midi_in.callback = MidiCallback
 
 midi_in.open_port(port_in)
 midi_out.open_port(port_out)
+
+
+# A second midi input device (midiloop) with same callback.
+#       That means I will be able to pilot XR18 from Ableton Live too!
+if MIDINAME2 != "None":
+    midi_in2=rtmidi.MidiIn()
+    port_in2=OpenMidiPort(MIDINAME2,midi_in2,"Input Devices")
+    midi_in2.open_port(port_in2)
+    midi_in2.callback = MidiCallback 
+
+
 print "====================================="
 help()
 
