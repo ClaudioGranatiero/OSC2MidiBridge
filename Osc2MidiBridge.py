@@ -30,6 +30,7 @@ import ast
 import string
 
 ### Some global variables ###
+CONFIGFILE='osc2midi.ini'
 LastMidiEvent=0
 DebugOSCsend=0
 DebugOSCrecv=0
@@ -166,6 +167,14 @@ print "Midi-OSC Bridge v."+VERSION
 print "------------------------------"
 
 parser = ConfigParser.SafeConfigParser()
+home = os.path.expanduser("~")
+if os.path.isfile(home+CONFIGFILE):
+    configfile=home+CONFIGFILE
+else:
+    configfile=CONFIGFILE
+
+print "ConfigFile: ",configfile
+        
 if parser.read('osc2midi.ini') != None:
     try:
         MIDINAME=ReadConfig('MIDI', 'DeviceName')
@@ -531,8 +540,9 @@ def parse_messages():
                 if tags == 'i':
                     val=int(data[0])
 
-                FxParVal[slot-1][par-1][0]=tags
-                FxParVal[slot-1][par-1][1]=val
+                if par <= len(FxParVal):
+                    FxParVal[slot-1][par-1][0]=tags
+                    FxParVal[slot-1][par-1][1]=val
                 if slot == CurrentFx: #  here we are
                     index=2+FxParam[FxType[slot-1]].index(par)-6*FxShift
                     if index >=2 and index <= 7:
@@ -953,7 +963,7 @@ def MidiCallback(message, time_stamp):
         try:
             if interpolation != None:
                 oscsend(address,interpolate(float(val)/127,0,1.0,interpolation[0],interpolation[1]))
-	    else:
+            else:
                 oscsend(address,float(val)/127)
         except:
             oscsend(address,int(val))
@@ -970,6 +980,7 @@ def OpenMidiPort(name,midi_port, descr="Devices"):
         if port_name.find(name) != -1:
             port=i
             print "    ",i,": * ",port_name," *"
+            break
         else:
             print "    ",i,": ",port_name
         i=i+1
