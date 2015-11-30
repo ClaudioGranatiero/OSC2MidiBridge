@@ -166,6 +166,7 @@ print
 print "Midi-OSC Bridge v."+VERSION
 print "------------------------------"
 
+# The config file is searched first in the home directory, then in the current working folder.
 parser = ConfigParser.SafeConfigParser()
 home = os.path.expanduser("~")
 if os.path.isfile(home+CONFIGFILE):
@@ -271,7 +272,7 @@ def Reload(client,force=False):
 
     
     # Here we are asking some values back from XR18 (an OSC message with an address without value send to XR18 triggers an OSC message back from XR18 with the actual value)
-    # Let's start with the Type of effetct loaded in the 4 slot available
+    # Let's start with the Type of effect loaded in the 4 slot available and the return levels.
     # NB: slot are 1,2,3,4.
     if ReloadFxType:
         for i in range(1,5):
@@ -292,10 +293,10 @@ def Reload(client,force=False):
             #oscsend("/ch/0%d/mix/fader" % i)
             client.send(OSC.OSCMessage("/ch/%02d/mix/fader" % i)) # Master LR
             time.sleep(WAITOSC)
-            client.send(OSC.OSCMessage("/ch/%02d/config/name" % i))
+            client.send(OSC.OSCMessage("/ch/%02d/config/name" % i)) # Name of the channel 
             time.sleep(WAITOSC)
-            for j in range(7,11):
-                client.send(OSC.OSCMessage("/ch/%02d/mix/%02d/level" % (i,j))) # FX
+            for j in range(7,11): # 7-10 are the FX busses
+                client.send(OSC.OSCMessage("/ch/%02d/mix/%02d/level" % (i,j))) # FX sends
                 time.sleep(WAITOSC)
 
 
