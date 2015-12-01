@@ -1,5 +1,5 @@
 # OSC2MidiBridge
-Connect a Behringer XR18 (OSC) with a Behringer BCR2000 (Midi) Surface Control
+Connect a Behringer XR18 (OSC) to a Behringer BCR2000 (Midi) Surface Control
 
 Depens on the following modules:
 - pyOSC
