@@ -24,7 +24,6 @@ import threading
 import os
 if os.name == 'nt':
     import msvcrt
-#from ConfigParser import SafeConfigParser,ConfigParser
 import ConfigParser
 import ast
 import string
@@ -72,8 +71,6 @@ FxParVal=[ # [type, value] for 16 parameters
 ### Some safe defaults (overloaded in config file)
 MIDINAME="BCR2000 port 1"
 MIDINAME2="None"
-#MIDINAME="BCR2000"
-#MIDINAME="iCON iControls_Pro V1.02 Porta 1"
 MidiMode='BCR'
 ADDR='192.168.0.12'
 PORT_SRV=10024
@@ -166,6 +163,7 @@ print
 print "Midi-OSC Bridge v."+VERSION
 print "------------------------------"
 
+# The config file is searched first in the home directory, then in the current working folder.
 parser = ConfigParser.SafeConfigParser()
 home = os.path.expanduser("~")
 if os.path.isfile(home+CONFIGFILE):
@@ -271,13 +269,12 @@ def Reload(client,force=False):
 
     
     # Here we are asking some values back from XR18 (an OSC message with an address without value send to XR18 triggers an OSC message back from XR18 with the actual value)
-    # Let's start with the Type of effetct loaded in the 4 slot available
+    # Let's start with the Type of effect loaded in the 4 slot available and the return levels.
     # NB: slot are 1,2,3,4.
     if ReloadFxType:
         for i in range(1,5):
             if DebugOSCsend > 0:
                 print "OSCsend: /fx/%d/type" % i
-            #oscsend("/fx/%d/type" % i)
             client.send(OSC.OSCMessage("/fx/%d/type" % i)) # FX type
             client.send(OSC.OSCMessage("/rtn/%d/mix/fader" % i)) # FX return level (Master)
             time.sleep(WAITOSC)
@@ -289,55 +286,47 @@ def Reload(client,force=False):
     for i in range(1,17): 
         # Volume Master
         if ReloadMasterLevels:
-            #oscsend("/ch/0%d/mix/fader" % i)
             client.send(OSC.OSCMessage("/ch/%02d/mix/fader" % i)) # Master LR
             time.sleep(WAITOSC)
-            client.send(OSC.OSCMessage("/ch/%02d/config/name" % i))
+            client.send(OSC.OSCMessage("/ch/%02d/config/name" % i)) # Name of the channel 
             time.sleep(WAITOSC)
-            for j in range(7,11):
-                client.send(OSC.OSCMessage("/ch/%02d/mix/%02d/level" % (i,j))) # FX
+            for j in range(7,11): # 7-10 are the FX busses
+                client.send(OSC.OSCMessage("/ch/%02d/mix/%02d/level" % (i,j))) # FX sends
                 time.sleep(WAITOSC)
 
 
         # Mute
         if ReloadMasterMute:
-            #oscsend("/ch/0%d/mix/on" % i) # Mute
             client.send(OSC.OSCMessage("/ch/%02d/mix/on" % i)) # Mute
             time.sleep(WAITOSC)
 
         # Pan
         if ReloadMasterPan:
             client.send(OSC.OSCMessage("/ch/%02d/mix/pan" % i)) # Pan
-            #oscsend("/ch/0%d/mix/pan" % i) # Pan
             time.sleep(WAITOSC)
 
         #Solo
         if ReloadMasterSolo:
             client.send(OSC.OSCMessage("/-stat/solosw/%02d" % i)) # Solo
-            #oscsend("/-stat/solosw/0%d" % i) # Solo
             time.sleep(WAITOSC)
 
         # Send levels for Bus1
         if ReloadBus1Levels:
             client.send(OSC.OSCMessage("/ch/%02d/mix/01/level" % i)) # Phones 1 (Bus1)
-            #oscsend("/ch/0%d/mix/01/level" % i) # Phones 1 (Bus1)
             time.sleep(WAITOSC)
 
         # Send levels for Bus2
         if ReloadBus2Levels:
             client.send(OSC.OSCMessage("/ch/%02d/mix/02/level" % i)) # Phones 2 (Bus2)
-            #oscsend("/ch/0%d/mix/02/level" % i) # Phones 2 (Bus2)
             time.sleep(WAITOSC)
     # FX parameters for the currently selected slot.
     # CurrentFX is the currently selected slot (we can select 1 of 4 different slots with the 4 "User defined" buttons on BCR2000)
     if ReloadFxParams:
         for j in range(1,5):
-#        for i in FxParam[FxType[CurrentFx-1]]: # here we take the list of parameters for this type of effect loaded in the current slot
             for i in FxParam[FxType[j-1]]:
                 if DebugOSCsend > 0:
                     print "OSCsend: /fx/%d/par/%02d" % (j,i)
                 client.send(OSC.OSCMessage("/fx/%d/par/%02d" % (j,i))) # FX parameters
-                #oscsend("/fx/%d/par/%02d" % (CurrentFx,i)) # FX parameters
                 time.sleep(WAITOSC)
                 
 def request_notifications(client):
@@ -353,7 +342,6 @@ def request_notifications(client):
     global NoReload
     while do_exit == False:
         client.send(OSC.OSCMessage("/xremote"))
-        #oscsend("/xremote")
         time.sleep(WAITRELOAD)
         if NoReload == False:
             Reload(client)
@@ -592,7 +580,6 @@ def parse_messages():
 
             # Fx Return Levels
             elif re.match("/rtn/./mix/../level",addr):
-                #          01234567890123
                 slot=int(addr[5])
                 val=int(data[0]*127)
                 bus=int(addr[11:13])
@@ -614,7 +601,6 @@ def parse_messages():
 
             # Aux Return Levels
             elif re.match("/rtn/aux/mix/../level",addr):
-                #          01234567890123
                 slot=5
                 val=int(data[0]*127)
                 bus=int(addr[11:13])
@@ -712,7 +698,6 @@ def parse_messages():
     thread = threading.Thread(target=request_notifications, kwargs = {"client": client})
     thread.start()
     client.send(OSC.OSCMessage("/xremote"))
-    #oscsend("/xremote")
     LastMidiEvent=0
     Reload(client,True)
     try:
@@ -725,7 +710,6 @@ def oscsend(address, value=None):
     """
     Helper function to simply send OSC messages
     """
-    #client.send(OSC.OSCMessage("/xremote"))
     if DebugOSCsend > 0:
         print "oscsend(",address,",",value
     c = OSC.OSCClient()
@@ -780,7 +764,6 @@ def RefreshBCR():
    
 
 def RefreshBCRfx():
-    #print FxParVal[CurrentFx-1]
     for i in range(0,12):
         index=FxParam[FxType[CurrentFx-1]].index(FxParam[CurrentFx-1][i])
         tag=FxParVal[CurrentFx-1][i][0]
@@ -883,10 +866,8 @@ def MidiCallback(message, time_stamp):
                 else: # release
                     FxShift=0
                 RefreshBCRfx()
-                #client.send(OSC.OSCMessage("/fx/%d/type" % CurrentFx))
                 for i in FxParam[FxType[CurrentFx-1]]:
                     oscsend("/fx/%d/par/%02d" % (CurrentFx,i)) # FX parameters request
-                    #client.send(OSC.OSCMessage("/fx/%d/par/%02d" % (CurrentFx,i)))
                     time.sleep(WAITOSC)
 
             if cc == 85: # Bank!
@@ -967,7 +948,6 @@ def MidiCallback(message, time_stamp):
                 oscsend(address,float(val)/127)
         except:
             oscsend(address,int(val))
-        #client.send(OSC.OSCMessage(address).append(float(val)/127))
         
 def OpenMidiPort(name,midi_port, descr="Devices"):
     """
