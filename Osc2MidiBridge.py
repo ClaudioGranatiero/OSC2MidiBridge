@@ -3,6 +3,7 @@
 
 """
 History:
+    2015-12-04: 0.0.11: refactoring, some MCU implementation
     2015-11-27: 0.0.10: Fx Sends in PushEncoders Group 3; interpolation
     2015-11-26: 0.0.9: Fx/Aux Return Level in Bank2
     2015-11-26: 0.0.8: status leds on BCR2000; offline values from BCR; FX return level
@@ -39,6 +40,11 @@ DebugOSCrecv=0
 DebugMIDIsend=0
 DebugMIDIrecv=0
 Bank=0
+ActiveBus=0
+BUS_FX_RETURN=-1 # Not Yet Implemented
+BUS_AUX_RETURN=-1 # Not Yet Implemented
+BUS_MASTER=0
+BUS_FX_SENDS=-1 # Not Yet Implemented
 FxShift=0
 Stat=0
 FlipFlop=0
@@ -283,6 +289,17 @@ if os.name != 'nt':
     atexit.register(set_normal_term)
     set_curses_term()
 
+def sendToMCU(fader,val):
+    midi_out.send_message([0x90,0x67+fader,127]) # unlock fader
+    midi_out.send_message([0xDF+fader ,val,val]) # move fader
+    midi_out.send_message([0x90,0x67+fader ,0])  # lock fader
+
+def sendToBCR(channel,slot,val):
+    if MidiMode == 'BCR':
+        if channel >= 0 and channel <=3:
+            cmd=0xB0+channel
+        midi_out.send_message([cmd,slot,val])
+
 
 def interpolate(value, inMin, inMax, outMin, outMax):
     """
@@ -461,7 +478,7 @@ def Progress(incremento=127/15):
     """
     global Stat
     global FlipFlop
-    midi_out.send_message([0xB2,1,int(Stat)])
+    sendToBCR(2,1,int(Stat))
     Stat += incremento
     if Stat > 127:
         Stat = 127/15
@@ -470,11 +487,11 @@ def Progress(incremento=127/15):
     if do_exit != True:
         threading.Timer(1,Progress,()).start()
     if Bank == 0:
-        midi_out.send_message([0xB0,85,0])
+        sendToBCR(0,85,0)
     if Bank == 1:
-        midi_out.send_message([0xB0,85,127])
+        sendToBCR(0,85,127)
     if Bank == 2:
-        midi_out.send_message([0xB0,85,FlipFlop*127])
+        sendToBCR(0,85,FlipFlop*127)
         FlipFlop=not FlipFlop
 
     
@@ -543,18 +560,24 @@ def parse_messages():
                   if channel >= (1+8*Bank) and channel <= (8+8*Bank):
                       if bus == 1:
                           if MidiMode == 'BCR':
-                              midi_out.send_message([0xB1,channel-8*Bank,val]) #MIDI ch. 2
+                              sendToBCR(1,channel-8*Bank,val)
                           elif MidiMode == 'MCU':
-                              pass # Not Yet Implemented
+                              if ActiveBus == bus:
+                                  sendToMCU(channel-8*Bank,val)
                       
                       elif bus == 2:
                           if MidiMode == 'BCR':
-                              midi_out.send_message([0xB3,channel-8*Bank,val]) #MIDI ch. 4                  
+                              sendToBCR(3,channel-8*Bank,val)
                           elif MidiMode == 'MCU':
-                              pass # Not Yet Implemented
+                              if ActiveBus == bus:
+                                  sendToMCU(channel-8*Bank,val)
                       if bus >=7 and bus <= 10:
-                          if bus == CurrentFx+6:
-                              midi_out.send_message([0xB0,16+channel-8*Bank,val]) #MIDI ch. 4                  
+                          if MidiMode == 'BCR':
+                              if bus == CurrentFx+6:
+                                  sendToBCR(0,16+channel-8*Bank,val)
+                              elif MidiMode == 'MCU':
+                                  if ActiveBus == bus:
+                                      sendToMCU(channel-8*Bank,val)
                       else:
                         pass # At the moment, the other busses are not mapped...
                           
@@ -581,9 +604,10 @@ def parse_messages():
                         # ie: slot=2, FxType[1]=11, CurrentFx=2, FxParam[11]=[1,4,5,6,7,9,2], par=9 -> send(0xB2,6,val)
                         try:
                             if MidiMode == 'BCR':
-                                midi_out.send_message([0xB2,index,val]) #MIDI ch. 3 NB: in my BCR fx params starts from CC2 (CC1 is faulty!)
+                                sendToBCR(2,index,val) #MIDI ch. 3 NB: in my BCR fx params starts from CC2 (CC1 is faulty!)
                             elif MidiMode == 'MCU':
-                                pass # Not Yet Implemented
+                                if ActiveBus == bus:
+                                    sendToMCU(index,val)
                         except:
                             pass
          
@@ -601,9 +625,10 @@ def parse_messages():
                 
                 if Bank == 2:
                     if MidiMode == 'BCR':
-                        midi_out.send_message([0xB0,slot,val])
+                        sendToBCR(0,slot,val)
                     elif MidiMode == 'MCU':
-                        pass # Not Yet Implemented
+                        if ActiveBus == BUS_FX_RETURN:
+                            sendToMCU(channel,val)
 
             # Aux Return Levels (Master)
             elif re.match("/rtn/aux/mix/fader",addr):
@@ -616,9 +641,10 @@ def parse_messages():
                 
                 if Bank == 2:
                     if MidiMode == 'BCR':
-                        midi_out.send_message([0xB0,slot,val])
+                        sendToBCR(0,slot,val)
                     elif MidiMode == 'MCU':
-                        pass # Not Yet Implemented
+                        if ActiveBus == BUS_AUX_RETURN:
+                            sendToMCU(channel,val)
 
 
 
@@ -629,18 +655,19 @@ def parse_messages():
                 bus=int(addr[11:13])
                 if bus >= 1 and bus <= 2:
                     FxReturn[bus][slot-1]=val
-         
+
                 if DebugOSCrecv > 0:
                     print "FX return: current=%d - slot=%d - bus=%d - val=%f" %(CurrentFx,slot,bus,val)
-                
+
                 if Bank == 2:
                     if MidiMode == 'BCR':
                         if bus==1:
-                            midi_out.send_message([0xB1,slot,val])
+                            sendToBCR(1,slot,val)
                         if bus==2:
-                            midi_out.send_message([0xB3,slot,val])
+                            sendToBCR(3,slot,val)
                     elif MidiMode == 'MCU':
-                        pass # Not Yet Implemented
+                        if ActiveBus == bus:
+                            sendToMCU(slot,val)
 
 
             # Aux Return Levels
@@ -649,18 +676,19 @@ def parse_messages():
                 val=int(data[0]*127)
                 bus=int(addr[11:13])
                 FxReturn[bus][slot-1]=val
-         
+
                 if DebugOSCrecv > 0:
                     print "FX return: current=%d - slot=%d - bus=%d - val=%f" %(CurrentFx,slot,bus,val)
-                
+
                 if Bank == 2:
                     if MidiMode == 'BCR':
                         if bus==1:
-                            midi_out.send_message([0xB1,slot,val])
+                            sendToBCR(1,slot,val)
                         if bus==2:
-                            midi_out.send_message([0xB3,slot,val])
+                            sendToBCR(3,slot,val)
                     elif MidiMode == 'MCU':
-                        pass # Not Yet Implemented
+                        if ActiveBus == bus:
+                            sendToMCU(slot,val)
 
 
             # Mixer Channels (es: "/ch/01/mix/03")
@@ -674,26 +702,24 @@ def parse_messages():
                         if DebugOSCrecv > 0:
                            print "Channel %d, Val=%d (Bank=%d)" % (channel,val,Bank)
                         if MidiMode == 'BCR':
-                            midi_out.send_message([0xB0,channel-8*Bank,val]) #MIDI ch. 1
-                        else:
-                            midi_out.send_message([0x90,0x67+channel-8*Bank,127])
-                            midi_out.send_message([0xDF+channel-8*Bank,val,val])
-                            midi_out.send_message([0x90,0x67+channel-8*Bank,0])
-                    
+                            sendToBCR(0,channel-8*Bank,val)
+                        elif MidiMode == 'MCU':
+                            if ActiveBus == BUS_MASTER:
+                                sendToMCU(channel-8*Bank,val)
+
             elif re.match("/ch/../mix/pan",addr): # Pan Master
                 channel=int(addr[4:6])
                 val=int(data[0]*127)
                 if channel >= 1 and channel <= 16:
                     Pan[channel-1]=val
-                if Bank < 2:    
+                if Bank < 2:
                     if channel >= (1+8*Bank) and channel <= (8+8*Bank):
                         if DebugOSCrecv > 0:
                            print "Channel %d, Val=%d" % (channel,val)
                         if MidiMode == 'BCR':
-                            midi_out.send_message([0xB0,8+channel-8*Bank,val]) #MIDI ch. 1
+                            sendToBCR(0,8+channel-8*Bank,val) #MIDI ch. 1
                         elif MidiMode == 'MCU':
                             pass # Not Yet Implemented
-                    
 
             elif re.match("/ch/../mix/on",addr):
                    val=int(data[0])
@@ -707,12 +733,12 @@ def parse_messages():
                        if channel >= (1+8*Bank) and channel <= (8+8*Bank):
                            if int(data[0]) == 0:
                                if MidiMode == 'BCR':
-                                   midi_out.send_message([0xB0,72+channel-8*Bank,127]) #MIDI ch. 1
+                                   sendToBCR(0,72+channel-8*Bank,127) #MIDI ch. 1
                                elif MidiMode == 'MCU':
                                    pass # Not Yet Implemented
                            else:
                                if MidiMode == 'BCR':
-                                   midi_out.send_message([0xB0,72+channel-8*Bank,0]) #MIDI ch. 1
+                                   sendToBCR(0,72+channel-8*Bank,0) #MIDI ch. 1
                                elif MidiMode == 'MCU':
                                    pass # Not Yet Implemented                       
             
@@ -726,7 +752,7 @@ def parse_messages():
                         if DebugOSCrecv > 0:
                             print "Solo channel %d = %d" % (channel,val)
                         if MidiMode == 'BCR':
-                            midi_out.send_message([0xB0,64+channel-8*Bank,val*127]) #MIDI ch. 1, CC 65 - 73
+                            sendToBCR(0,64+channel-8*Bank,val*127) #MIDI ch. 1, CC 65 - 73
                         elif MidiMode == 'MCU':
                             pass # Not Yet Implemented
                 
@@ -789,22 +815,25 @@ def RefreshBCR():
     for i in range(1,9):
         if MidiMode == 'BCR':
             if Bank < 2:
-                midi_out.send_message([0xB0,i,Volume[0][i+8*Bank-1]]) #MIDI ch. 1
-                midi_out.send_message([0xB1,i,Volume[1][i+8*Bank-1]]) #MIDI ch. 2
-                midi_out.send_message([0xB3,i,Volume[2][i+8*Bank-1]]) #MIDI ch. 4
-                midi_out.send_message([0xB0,8+i,Pan[i+8*Bank-1]]) #MIDI ch. 1
-                midi_out.send_message([0xB0,16+i,Volume[2+CurrentFx][i+8*Bank-1]]) #MIDI ch. 1                
-                midi_out.send_message([0xB0,72+i,Mute[i+8*Bank-1]]) #MIDI ch. 1
-                midi_out.send_message([0xB0,64+i,Solo[i+8*Bank-1]]) #MIDI ch. 1, CC 65 - 73
+                sendToBCR(0,i,Volume[0][i+8*Bank-1]) #MIDI ch. 1
+                sendToBCR(1,i,Volume[1][i+8*Bank-1]) #MIDI ch. 2
+                sendToBCR(3,i,Volume[2][i+8*Bank-1]) #MIDI ch. 4
+                sendToBCR(0,8+i,Pan[i+8*Bank-1]) #MIDI ch. 1
+                sendToBCR(0,16+i,Volume[2+CurrentFx][i+8*Bank-1]) #MIDI ch. 1
+                sendToBCR(0,72+i,Mute[i+8*Bank-1]) #MIDI ch. 1
+                sendToBCR(0,64+i,Solo[i+8*Bank-1]) #MIDI ch. 1, CC 65 - 73
             if Bank == 2:
                 if i <= 5:
-                    midi_out.send_message([0xB0,i,FxReturn[0][i-1]])
-                    midi_out.send_message([0xB1,i,FxReturn[1][i-1]])
-                    midi_out.send_message([0xB3,i,FxReturn[2][i-1]])                
+                    sendToBCR(0,i,FxReturn[0][i-1])
+                    sendToBCR(1,i,FxReturn[1][i-1])
+                    sendToBCR(3,i,FxReturn[2][i-1])
         elif MidiMode == 'MCU':
-            midi_out.send_message([0x90,0x67+i,127])
-            midi_out.send_message([0xDF+i,Volume[0][i+8*Bank],Volume[0][i+8*Bank-1]])
-            midi_out.send_message([0x90,0x67+i,0])
+            if Bank < 2:
+                sendToMCU(i,Volume[ActiveBus][i+8*Bank-1])
+            if Bank == 2:
+                if i <= 5:
+                    sentToMCU(i,FxReturn[0][i-1])
+ 
    
 
 def RefreshBCRfx():
@@ -815,17 +844,14 @@ def RefreshBCRfx():
         if DebugOSCrecv > 1: print "i=%d, index=%d, val=%d (%c)" % (i,index,val,tag)
         if index >= 6*FxShift and index <= 5+6*FxShift:
             if MidiMode == 'BCR':
-                midi_out.send_message([0xB2,2+index-6*FxShift,val]) #MIDI ch. 3 NB: in my BCR fx params starts from CC2 (CC1 is faulty!)
+                sendToBCR(2,2+index-6*FxShift,val) #MIDI ch. 3 NB: in my BCR fx params starts from CC2 (CC1 is faulty!)
                 if DebugMIDIsend > 0: print "Midi send: CC=%d, val=%d, FxShift=%d" % (2+index-7*FxShift,val,FxShift)
             elif MidiMode == 'MCU':
-                pass # Not Yet Implemented
+                if ActiveBus == BUS_FX_SENDS:
+                    sendToMCU(i,index-6*FxShift,val)
 
-            
     RefreshBCR()
 
-
-
-    
 def MidiCallback(message, time_stamp):
     """
     MIDI receiver handler callback
@@ -886,24 +912,24 @@ def MidiCallback(message, time_stamp):
                     else: val=127
                     Mute[cc-72+8*Bank-1]=val
 
-                    
             # 81,82,83,84 are the User Defined buttons: they select the current FX
             if cc >= 81 and cc <=84:
                 CurrentFx=cc-80
-                    
+
                 # these buttons should be exclusively selectable (selecting one deselect the others)
-                for i in range(81,85):
-                    if i == cc:
-                        midi_out.send_message([0xB0,i,127]) #MIDI ch. 1
-                        if DebugMIDIrecv > 1:
-                            print "MIDI Send 0xB0,%d,127" %i
-                    else:
-                        midi_out.send_message([0xB0,i,0]) #MIDI ch. 1
-                        if DebugMIDIrecv > 1:
-                            print "MIDI Send 0xB0,%d,0" %i
+                if MidiMode == 'BCR':
+                    for i in range(81,85):
+                        if i == cc:
+                            sendToBCR(0,i,127) #MIDI ch. 1
+                            if DebugMIDIrecv > 1:
+                                print "MIDI Send 0xB0,%d,127" %i
+                        else:
+                            sendToBCR(0,i,0) #MIDI ch. 1
+                            if DebugMIDIrecv > 1:
+                                print "MIDI Send 0xB0,%d,0" %i
                 if DebugMIDIrecv > 0:
                     print "CurrentFx=%d" % CurrentFx
-                    
+
                 if val == 127: # press
                     oscsend("/fx/%d/type" % CurrentFx) # FX
                     FxShift=1
@@ -918,10 +944,10 @@ def MidiCallback(message, time_stamp):
                 Bank += 1
                 if Bank > 2:
                     Bank=0
-                    
+
                 RefreshBCR()
 
-                
+
 
 ####  MIDI Channel 2 ####
         if MidiChannel == 2: # Livelli Bus1
@@ -1040,12 +1066,13 @@ help()
 
 ### Some MIDI initial setup ###
 # CurrentFx buttons:
-midi_out.send_message([0xB0,81,0])   #MIDI ch. 1, CC81, off
-midi_out.send_message([0xB0,82,0])   #MIDI ch. 1, CC82, off
-midi_out.send_message([0xB0,83,0])   #MIDI ch. 1, CC83, off
-midi_out.send_message([0xB0,84,0])   #MIDI ch. 1, CC84, off
-midi_out.send_message([0xB0,80+CurrentFx,127]) #MIDI ch. 1, CC81, on (se CurrentFx = 1)
-midi_out.send_message([0xB0,85,0])   # Bank status
+if MidiMode == 'BCR':
+    sendToBCR(0,81,0)   #MIDI ch. 1, CC81, off
+    sendToBCR(0,82,0)   #MIDI ch. 1, CC82, off
+    sendToBCR(0,83,0)   #MIDI ch. 1, CC83, off
+    sendToBCR(0,84,0)   #MIDI ch. 1, CC84, off
+    sendToBCR(0,80+CurrentFx,127) #MIDI ch. 1, CC81, on (se CurrentFx = 1)
+    sendToBCR(0,85,0)   # Bank status
 
 threading.Timer(1,Progress,()).start()
 
