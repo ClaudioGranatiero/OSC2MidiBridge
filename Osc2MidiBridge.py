@@ -24,6 +24,9 @@ import threading
 import os
 if os.name == 'nt':
     import msvcrt
+else:
+    import sys, termios, atexit,time
+    from select import select
 import ConfigParser
 import ast
 import string
@@ -244,6 +247,42 @@ Esempio di "osc2midi.ini":
             ]
 
 """
+if os.name != 'nt':
+# save the terminal settings
+    fd = sys.stdin.fileno()
+    new_term = termios.tcgetattr(fd)
+    old_term = termios.tcgetattr(fd)
+
+# new terminal setting unbuffered
+    new_term[3] = (new_term[3] & ~termios.ICANON & ~termios.ECHO)
+
+# switch to normal terminal
+    def set_normal_term():
+            termios.tcsetattr(fd, termios.TCSAFLUSH, old_term)
+
+# switch to unbuffered terminal
+    def set_curses_term():
+            termios.tcsetattr(fd, termios.TCSAFLUSH, new_term)
+
+    def putch(ch):
+            sys.stdout.write(ch)
+
+    def getch():
+            return sys.stdin.read(1)
+
+    def getche():
+            ch = getch()
+            putch(ch)
+            return ch
+
+    def kbhit():
+            dr,dw,de = select([sys.stdin], [], [], 0)
+            return dr <> []
+
+
+    atexit.register(set_normal_term)
+    set_curses_term()
+
 
 def interpolate(value, inMin, inMax, outMin, outMax):
     """
@@ -346,44 +385,49 @@ def request_notifications(client):
         if NoReload == False:
             Reload(client)
 
+        ch=''
         if os.name == 'nt': # At the moment this works only in Windows... That's all I need.
             if msvcrt.kbhit():
                 ch=msvcrt.getch() 
-                print "hai premuto il tasto",ch
-                if ch == 'Q':
-                    do_exit=True
-                    print "-----------------------------------------------"
-                    print "Closing threads... Now you can exit with Ctrl-C"
-                if ch == 'q':
-                    DebugOSCsend=0
-                    DebugOSCrecv=0
-                    DebugMIDIsend=0
-                    DebugMIDIrecv=0
-                    status()
-                if ch == 'h':
-                    help()
-                if ch == 's':
-                    status()
-                if ch == 'n':
-                    NoReload=True
-                    status()
-                if ch == 'r':
-                    NoReload=False
-                    status()
-                if ch == 'o':
-                    DebugOSCsend+=1
-                    status()
-                if ch == 'O':
-                    DebugOSCrecv+=1
-                    status()
-                if ch == 'm':
-                    DebugMIDIsend+=1
-                    status()
-                if ch == 'M':
-                    DebugMIDIrecv+=1
-                    status()
-                if ch == 'R':
-                    Reload(client,True)
+        else:
+            if kbhit():
+                ch=getch()
+        
+        print "hai premuto il tasto",ch
+        if ch == 'Q':
+            do_exit=True
+            print "-----------------------------------------------"
+            print "Closing threads... Now you can exit with Ctrl-C"
+        if ch == 'q':
+            DebugOSCsend=0
+            DebugOSCrecv=0
+            DebugMIDIsend=0
+            DebugMIDIrecv=0
+            status()
+        if ch == 'h':
+            help()
+        if ch == 's':
+            status()
+        if ch == 'n':
+            NoReload=True
+            status()
+        if ch == 'r':
+            NoReload=False
+            status()
+        if ch == 'o':
+            DebugOSCsend+=1
+            status()
+        if ch == 'O':
+            DebugOSCrecv+=1
+            status()
+        if ch == 'm':
+            DebugMIDIsend+=1
+            status()
+        if ch == 'M':
+            DebugMIDIrecv+=1
+            status()
+        if ch == 'R':
+            Reload(client,True)
     exit()
 def help():
     print "h - this help page"
