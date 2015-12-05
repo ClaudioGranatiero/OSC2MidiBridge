@@ -3,6 +3,7 @@
 
 """
 History:
+    2015-12-05: 0.0.12: added other MCU implementations; LCD support
     2015-12-04: 0.0.11: refactoring, some MCU implementation
     2015-11-27: 0.0.10: Fx Sends in PushEncoders Group 3; interpolation
     2015-11-26: 0.0.9: Fx/Aux Return Level in Bank2
@@ -15,7 +16,10 @@ History:
     2015-11-21: 0.0.2: refactoring, configuration file
     2015-11-20: 0.0.1: first working version; FX parameters
 """
-VERSION="0.0.10"
+VERSION="0.0.12"
+LCD_I2C=False
+RPI_I2C=True
+PYLCDLIB=False
 
 import rtmidi_python as rtmidi
 import time
@@ -31,6 +35,12 @@ else:
 import ConfigParser
 import ast
 import string
+if LCD_I2C:
+    import lcd_i2c as lcd
+if RPI_I2C:
+    import RPi_I2C_driver as lcd
+if PYLCDLIB:
+    import pylcdlib
 
 ### Some global variables ###
 CONFIGFILE='osc2midi.ini'
@@ -50,6 +60,7 @@ Stat=0
 FlipFlop=0
 VoiceChannel=0
 do_exit=False
+BusName=["Master","Bus1","Bus2","Bus3","Bus4","Bus5","Bus6"]
 FxType=[0,0,0,0]
 FxReturn=[ #Fx1, Fx2, Fx3, Fx4, Aux
             [0,0,0,0,0], # Master
@@ -153,6 +164,13 @@ FxParam=[
             [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #43 Tube Stage
             [1,2,3,4,5,6,7,8,9,10,11,12,13,14]  #44 Stereo / Dual Pitch
         ]
+if LCD_I2C:
+    lcd.lcd_init()
+if PYLCDLIB:
+    lcd = pylcdlib.lcd(0x27,1)
+    lcd = pylcdlib.lcd(0x27,1)
+if RPI_I2C:
+    lcd = lcd.lcd()
 
 def ReadConfig(Section,Option,Type=None):
     if Type == 'int':
@@ -169,10 +187,23 @@ def ReadConfig(Section,Option,Type=None):
 
 
 print 
-print "Midi-OSC Bridge v."+VERSION
+print "Osc2MidiBridge v."+VERSION
 print "------------------------------"
+#           1234567890123456
+if LCD_I2C:
+    lcd.lcd_string("Osc2MidiBridge",lcd.LCD_LINE_1)
+    lcd.lcd_string("%s by CGsoft"%VERSION,lcd.LCD_LINE_2)
+if PYLCDLIB:
+    lcd.lcd_puts("Osc2MidiBridge",1)
+    lcd.lcd_puts("%s by CGsoft"%VERSION,2)
+if RPI_I2C:
+    lcd.lcd_display_string("Osc2MidiBridge",1)
+    lcd.lcd_display_string("%s by CGsoft"%VERSION,2)
+time.sleep(1)
+if LCD_I2C: lcd.lcd_clear()
+if RPI_I2C: lcd.lcd_clear()
 
-# The config file is searched first in the home directory, then in the current working folder.
+# The config file is searched firs#t in the home directory, then in the current working folder.
 parser = ConfigParser.SafeConfigParser()
 home = os.path.expanduser("~")
 if os.path.isfile(home+CONFIGFILE):
@@ -338,7 +369,11 @@ def Reload(client,force=False):
             time.sleep(WAITOSC)
             client.send(OSC.OSCMessage("/rtn/%d/mix/02/level" % i)) # FX return level (Bus2)
             time.sleep(WAITOSC)
-    
+    client.send(OSC.OSCMessage("/lr/config/name")) # Name of the master bus
+    time.sleep(WAITOSC)
+    for i in range(1,7):
+            client.send(OSC.OSCMessage("/bus/%d/config/name" % i)) # Name of the bus
+            time.sleep(WAITOSC)
     for i in range(1,17): 
         # Volume Master
         if ReloadMasterLevels:
@@ -396,7 +431,9 @@ def request_notifications(client):
     global DebugMIDIrecv
     
     global NoReload
+
     while do_exit == False:
+        #lcd_status()
         client.send(OSC.OSCMessage("/xremote"))
         time.sleep(WAITRELOAD)
         if NoReload == False:
@@ -409,43 +446,71 @@ def request_notifications(client):
         else:
             if kbhit():
                 ch=getch()
-        
-        print "hai premuto il tasto",ch
-        if ch == 'Q':
-            do_exit=True
-            print "-----------------------------------------------"
-            print "Closing threads... Now you can exit with Ctrl-C"
-        if ch == 'q':
-            DebugOSCsend=0
-            DebugOSCrecv=0
-            DebugMIDIsend=0
-            DebugMIDIrecv=0
-            status()
-        if ch == 'h':
-            help()
-        if ch == 's':
-            status()
-        if ch == 'n':
-            NoReload=True
-            status()
-        if ch == 'r':
-            NoReload=False
-            status()
-        if ch == 'o':
-            DebugOSCsend+=1
-            status()
-        if ch == 'O':
-            DebugOSCrecv+=1
-            status()
-        if ch == 'm':
-            DebugMIDIsend+=1
-            status()
-        if ch == 'M':
-            DebugMIDIrecv+=1
-            status()
-        if ch == 'R':
-            Reload(client,True)
+        if ch != '': 
+            print "hai premuto il tasto",ch
+            if ch == 'Q':
+                do_exit=True
+                print "-----------------------------------------------"
+                print "Closing threads... Now you can exit with Ctrl-C"
+            if ch == 'q':
+                DebugOSCsend=0
+                DebugOSCrecv=0
+                DebugMIDIsend=0
+                DebugMIDIrecv=0
+                status()
+            if ch == 'h':
+                help()
+            if ch == 's':
+                status()
+            if ch == 'n':
+                NoReload=True
+                status()
+            if ch == 'r':
+                NoReload=False
+                status()
+            if ch == 'o':
+                DebugOSCsend+=1
+                status()
+            if ch == 'O':
+                DebugOSCrecv+=1
+                status()
+            if ch == 'm':
+                DebugMIDIsend+=1
+                status()
+            if ch == 'M':
+                DebugMIDIrecv+=1
+                status()
+            if ch == 'R':
+                Reload(client,True)
     exit()
+
+def lcd_status(MidiChannel=0, cc=0, val=0):
+    if ActiveBus == 0:
+        BUS="MASTER: %s" % BusName[0]
+    for Bus in range(1,7):
+        if ActiveBus == Bus:
+            BUS="Bus%d: %s" %(Bus, BusName[Bus])
+    if LCD_I2C:
+        #lcd.lcd_clear()
+        lcd.lcd_string("Bk%d Fx%d"%(Bank,CurrentFx),lcd.LCD_LINE_1)
+        lcd.lcd_string(" "*16,lcd.LCD_LINE_2)
+        lcd.lcd_string("%s"%(BUS),lcd.LCD_LINE_2)
+        #if MidiChannel < 16 and MidiChannel > 0 and cc < 0x100 and cc >= 0 and val < 0x100 and val >= 0 and time.time() - LastMidiEvent > 1: 
+        #    lcd.lcd_puts("Ch%x CC%02x v:%02x"%(MidiChannel,cc,val),2)
+    if PYLCDLIB:
+        #lcd.lcd_clear()
+        lcd.lcd_puts("Bk%d Fx%d"%(Bank,CurrentFx),1)
+        lcd.lcd_puts(" "*16,2)
+        lcd.lcd_puts("%s"%(BUS),2)
+        #if MidiChannel < 16 and MidiChannel > 0 and cc < 0x100 and cc >= 0 and val < 0x100 and val >= 0 and time.time() - LastMidiEvent > 1: 
+        #    lcd.lcd_string("Ch%x CC%02x v:%02x"%(MidiChannel,cc,val),lcd.LCD_LINE_2)
+    if RPI_I2C:
+        #lcd.lcd_clear()
+        lcd.lcd_display_string("Bk%d Fx%d"%(Bank,CurrentFx),1)
+        lcd.lcd_display_string(" "*16,2)
+        lcd.lcd_display_string("%s"%(BUS),2)
+        #if MidiChannel < 16 and MidiChannel > 0 and cc < 0x100 and cc >= 0 and val < 0x100 and val >= 0 and time.time() - LastMidiEvent > 1: 
+        #    lcd.lcd_display_string("Ch%x CC%02x v:%02x"%(MidiChannel,cc,val),2)
 def help():
     print "h - this help page"
     print "Q - prepare to quit (close sockets and threads)"
@@ -515,6 +580,8 @@ def parse_messages():
         global Solo
         global FxParVal
         global FxReturn        
+        global BusName
+
         if time.time() - LastMidiEvent > WAITMIDI: # we are parsing OSC messages only if a consistent time is passed from the last Midi event
             if DebugOSCrecv > 0:
                 print 'OSCMessage("%s",%s,%s)' % (addr, tags, data)
@@ -542,8 +609,17 @@ def parse_messages():
                 name=data[0]
                 if DebugOSCrecv > 0: print "Channel %d is named %s" %(channel,name)
                 if name.lower() in ("voce","voce1","vox","vox1","voice","voice1"):
-                    if DebugOSCrecv > 0: print "VoiceChannel=%d" % channel
                     VoiceChannel=channel
+                    if DebugOSCrecv > 0: print "VoiceChannel=%d" % channel
+            elif re.match("/bus/./config/name",addr):
+                channel=int(addr[5])
+                name=data[0]
+                if DebugOSCrecv > 0: print "Bus %d is named %s" %(channel,name)
+                BusName[channel]=name 
+            elif re.match("/lr/config/name",addr):
+                name=data[0]
+                if DebugOSCrecv > 0: print "Master Bus is named %s" %(name)
+                BusName[0]=name 
                     
             elif re.match("/ch/../mix/../level",addr): # Bus Sends
             # The busses 7-10 are the Fx Return Busses
@@ -866,6 +942,7 @@ def MidiCallback(message, time_stamp):
     global Solo
     global FxParVal
     global FxReturn
+    global ActiveBus
     
     cc=0
     val=0
@@ -873,7 +950,53 @@ def MidiCallback(message, time_stamp):
     MidiChannel=0
     interpolation=None
 
-    if int(message[0]) >= 0xB0 and int(message[0]) <= 0xBF: # at the moment we'll process only ContinousControls (CC).
+    if DebugMIDIrecv > 0:
+        print "0x%02x, 0x%02x, 0x%02x" % (message[0],message[1],message[2])
+
+##### iControlPro ####
+    if MidiMode == 'MCU':
+        if message[0] == 0x90:
+            if message[1] >= 0x18 and message[1] <= 0x1f: # Sel Button
+                ActiveBus=message[1]-0x17
+                lcd_status()
+                RefreshBCR()
+            if message[1] == 0x33:
+                ActiveBus=0
+                lcd_status()
+                RefreshBCR()
+
+        if message[0] >= 0xe0 and message[0] <= 0xe8: # Fader
+            cc=message[0]-0xdf
+            val=message[1]
+            if DebugMIDIrecv > 0:
+                print "#",cc," =",val
+            if ActiveBus == 0: # Master Volume
+                if Bank < 2:
+                    address="/ch/%02d/mix/fader" % (cc+8*Bank)
+                    Volume[0][cc+8*Bank-1]=val
+                if Bank == 2:
+                    if cc < 5:
+                        address="/rtn/%d/mix/fader" % cc
+                    if cc == 5:
+                        address="/rtn/aux/mix/fader"
+                    FxReturn[0][cc-1]=val
+            if ActiveBus >=1 and ActiveBus <= 2: # Livelli Bus1
+                if Bank < 2:
+                    address="/ch/%02d/mix/01/level" % (cc+8*Bank)
+                    Volume[1][cc+8*Bank-1]=val
+                if Bank == 2:
+                    if cc < 5:
+                        address="/rtn/%d/mix/01/level" % cc
+                    if cc == 5:
+                        address="/rtn/aux/mix/01/level" 
+                    FxReturn[1][cc-1]=val
+            if DebugMIDIrecv > 0:
+                print "address=",address
+
+            RefreshBCR()
+###### BCR2000 ######
+
+    if MidiMode == 'BCR' and int(message[0]) >= 0xB0 and int(message[0]) <= 0xBF: # at the moment we'll process only ContinousControls (CC).
         LastMidiEvent=time.time()
         MidiChannel=message[0]-0xAF # (0xB0 is Channel 1, 0xBF is Channel 16)
         cc=message[1]
@@ -928,6 +1051,7 @@ def MidiCallback(message, time_stamp):
                             if DebugMIDIrecv > 1:
                                 print "MIDI Send 0xB0,%d,0" %i
                 if DebugMIDIrecv > 0:
+                    lcd_status()
                     print "CurrentFx=%d" % CurrentFx
 
                 if val == 127: # press
@@ -944,6 +1068,7 @@ def MidiCallback(message, time_stamp):
                 Bank += 1
                 if Bank > 2:
                     Bank=0
+                lcd_status()
 
                 RefreshBCR()
 
@@ -1007,6 +1132,7 @@ def MidiCallback(message, time_stamp):
                 if DebugMIDIrecv > 1:
                     print "Exp B"
                 address="/fx/2/par/01" # FX2 time
+
 # End of MidiCallback
 
 # Ok, if we have an address, we can send an OSC message:
@@ -1076,5 +1202,6 @@ if MidiMode == 'BCR':
 
 threading.Timer(1,Progress,()).start()
 
+lcd_status()
 parse_messages()
 
