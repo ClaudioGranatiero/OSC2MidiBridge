@@ -530,21 +530,28 @@ def Progress(incremento=127/15):
     """
     global Stat
     global FlipFlop
-    sendToBCR(2,1,int(Stat))
-    Stat += incremento
-    if Stat > 127:
-        Stat = 127/15
-    if Stat <= 0:
-        Stat = 127
+    if MidiMode == 'BCR':
+        sendToBCR(2,1,int(Stat))
+        Stat += incremento
+        if Stat > 127:
+            Stat = 127/15
+        if Stat <= 0:
+            Stat = 127
+        if Bank == 0:
+            sendToBCR(0,85,0)
+        if Bank == 1:
+            sendToBCR(0,85,127)
+        if Bank == 2:
+            sendToBCR(0,85,FlipFlop*127)
+ 
+    elif MidiMode == 'MCU':
+        midi_out.send_message([0x90,95 ,Stat])
+        if Stat == 0: Stat=127
+        else:  Stat=0
+
     if do_exit != True:
         threading.Timer(1,Progress,()).start()
-    if Bank == 0:
-        sendToBCR(0,85,0)
-    if Bank == 1:
-        sendToBCR(0,85,127)
-    if Bank == 2:
-        sendToBCR(0,85,FlipFlop*127)
-        FlipFlop=not FlipFlop
+    FlipFlop=not FlipFlop
 
     
 def parse_messages():
@@ -803,7 +810,7 @@ def parse_messages():
                                if MidiMode == 'BCR':
                                    sendToBCR(0,72+channel-8*Bank,0) #MIDI ch. 1
                                elif MidiMode == 'MCU':
-                                   pass # Not Yet Implemented                       
+                                   RefreshBCR()
             
             elif re.match("/-stat/solosw/..",addr):
                 channel=int(addr[14:16])
@@ -817,7 +824,7 @@ def parse_messages():
                         if MidiMode == 'BCR':
                             sendToBCR(0,64+channel-8*Bank,val*127) #MIDI ch. 1, CC 65 - 73
                         elif MidiMode == 'MCU':
-                            pass # Not Yet Implemented
+                            RefreshBCR()
                 
 
     # Setup OSC server & client
@@ -893,6 +900,8 @@ def RefreshBCR():
         elif MidiMode == 'MCU':
             if Bank < 2:
                 sendToMCU(i,Volume[ActiveBus][i+8*Bank-1])
+                midi_out.send_message([0x90,0x07+i,Solo[i+8*Bank-1]])
+                midi_out.send_message([0x90,0x0f+i,Mute[i+8*Bank-1]])
             if Bank == 2:
                 if i <= 5:
                     sendToMCU(i,FxReturn[0][i-1])
@@ -974,6 +983,30 @@ def MidiCallback(message, time_stamp):
                 if Bank > 2: Bank = 2
                 lcd_status()
                 RefreshBCR()
+            if message[1] >= 0x8 and message[1] <= 0xf and message[2] == 0x7f: # solo
+                if Bank < 2:
+                    cc=message[1]-0x7
+                    val=Solo[cc+8*Bank-1]
+                    if val == 0: val = 127
+                    else: val = 0
+                    address="/-stat/solosw/%02d" % (cc+8*Bank)
+                    Solo[cc+8*Bank-1]=val
+                    lcd_status()
+                    RefreshBCR()
+                    
+            if message[1] >= 0x10 and message[1] <= 0x17 and message[2] == 0x7f: # Mute
+                if Bank < 2:
+                    cc=message[1]-0x0f
+                    val=Mute[cc+8*Bank-1]
+                    if val == 0: val = 127
+                    else: val = 0
+                    address="/ch/%02d/mix/on" % (cc+8*Bank)
+                    if val > 0: val=0
+                    else: val=127
+                    Mute[cc+8*Bank-1]=val
+                    lcd_status()
+                    RefreshBCR()
+
 
         if message[0] >= 0xe0 and message[0] <= 0xe8: # Fader
             cc=message[0]-0xdf
@@ -1002,7 +1035,7 @@ def MidiCallback(message, time_stamp):
                     FxReturn[1][cc-1]=val
             if DebugMIDIrecv > 0:
                 print "address=",address
-
+            
             RefreshBCR()
 ###### BCR2000 ######
 
