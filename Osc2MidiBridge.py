@@ -3,6 +3,7 @@
 
 """
 History:
+    2015-12-06: 0.0.13: other MCU, fixes
     2015-12-05: 0.0.12: added other MCU implementations; LCD support
     2015-12-04: 0.0.11: refactoring, some MCU implementation
     2015-11-27: 0.0.10: Fx Sends in PushEncoders Group 3; interpolation
@@ -16,7 +17,7 @@ History:
     2015-11-21: 0.0.2: refactoring, configuration file
     2015-11-20: 0.0.1: first working version; FX parameters
 """
-VERSION="0.0.12"
+VERSION="0.0.13"
 LCD_I2C=False
 RPI_I2C=True
 PYLCDLIB=False
@@ -26,6 +27,7 @@ import time
 import re
 import OSC
 import threading
+import sys
 import os
 if os.name == 'nt':
     import msvcrt
@@ -35,15 +37,11 @@ else:
 import ConfigParser
 import ast
 import string
-if LCD_I2C:
-    import lcd_i2c as lcd
-if RPI_I2C:
-    import RPi_I2C_driver as lcd
-if PYLCDLIB:
-    import pylcdlib
+import RPi_I2C_driver
 
 ### Some global variables ###
 CONFIGFILE='osc2midi.ini'
+configfile=''
 LastMidiEvent=0
 DebugOSCsend=0
 DebugOSCrecv=0
@@ -164,13 +162,14 @@ FxParam=[
             [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #43 Tube Stage
             [1,2,3,4,5,6,7,8,9,10,11,12,13,14]  #44 Stereo / Dual Pitch
         ]
-if LCD_I2C:
-    lcd.lcd_init()
-if PYLCDLIB:
-    lcd = pylcdlib.lcd(0x27,1)
-    lcd = pylcdlib.lcd(0x27,1)
-if RPI_I2C:
-    lcd = lcd.lcd()
+
+if len(sys.argv) > 2:
+    if sys.argv[1] == '-f':
+         configfile=sys.argv[2] 
+
+def lcd_init():
+    mylcd = RPi_I2C_driver.lcd()
+    return(mylcd)
 
 def ReadConfig(Section,Option,Type=None):
     if Type == 'int':
@@ -190,30 +189,24 @@ print
 print "Osc2MidiBridge v."+VERSION
 print "------------------------------"
 #           1234567890123456
-if LCD_I2C:
-    lcd.lcd_string("Osc2MidiBridge",lcd.LCD_LINE_1)
-    lcd.lcd_string("%s by CGsoft"%VERSION,lcd.LCD_LINE_2)
-if PYLCDLIB:
-    lcd.lcd_puts("Osc2MidiBridge",1)
-    lcd.lcd_puts("%s by CGsoft"%VERSION,2)
-if RPI_I2C:
-    lcd.lcd_display_string("Osc2MidiBridge",1)
-    lcd.lcd_display_string("%s by CGsoft"%VERSION,2)
+lcd=lcd_init()
+lcd.lcd_display_string("Osc2MidiBridge",1)
+lcd.lcd_display_string("%s by CGsoft"%VERSION,2)
 time.sleep(1)
-if LCD_I2C: lcd.lcd_clear()
-if RPI_I2C: lcd.lcd_clear()
+lcd.lcd_clear()
 
 # The config file is searched firs#t in the home directory, then in the current working folder.
 parser = ConfigParser.SafeConfigParser()
 home = os.path.expanduser("~")
-if os.path.isfile(home+CONFIGFILE):
-    configfile=home+CONFIGFILE
-else:
-    configfile=CONFIGFILE
+if configfile == '':
+    if os.path.isfile(home+CONFIGFILE):
+        configfile=home+CONFIGFILE
+    else:
+        configfile=CONFIGFILE
 
 print "ConfigFile: ",configfile
         
-if parser.read('osc2midi.ini') != None:
+if parser.read(configfile) != None:
     try:
         MIDINAME=ReadConfig('MIDI', 'DeviceName')
         MIDINAME2=ReadConfig('MIDI', 'DeviceName2')
@@ -286,39 +279,42 @@ Esempio di "osc2midi.ini":
 """
 if os.name != 'nt':
 # save the terminal settings
-    fd = sys.stdin.fileno()
-    new_term = termios.tcgetattr(fd)
-    old_term = termios.tcgetattr(fd)
+    try:
+        fd = sys.stdin.fileno()
+        new_term = termios.tcgetattr(fd)
+        old_term = termios.tcgetattr(fd)
 
 # new terminal setting unbuffered
-    new_term[3] = (new_term[3] & ~termios.ICANON & ~termios.ECHO)
+        new_term[3] = (new_term[3] & ~termios.ICANON & ~termios.ECHO)
 
 # switch to normal terminal
-    def set_normal_term():
+        def set_normal_term():
             termios.tcsetattr(fd, termios.TCSAFLUSH, old_term)
 
 # switch to unbuffered terminal
-    def set_curses_term():
+        def set_curses_term():
             termios.tcsetattr(fd, termios.TCSAFLUSH, new_term)
 
-    def putch(ch):
+        def putch(ch):
             sys.stdout.write(ch)
 
-    def getch():
+        def getch():
             return sys.stdin.read(1)
 
-    def getche():
+        def getche():
             ch = getch()
             putch(ch)
             return ch
 
-    def kbhit():
+        def kbhit():
             dr,dw,de = select([sys.stdin], [], [], 0)
             return dr <> []
 
 
-    atexit.register(set_normal_term)
-    set_curses_term()
+        atexit.register(set_normal_term)
+        set_curses_term()
+    except:
+        pass
 
 def sendToMCU(fader,val):
     midi_out.send_message([0x90,0x67+fader,127]) # unlock fader
@@ -439,49 +435,53 @@ def request_notifications(client):
         if NoReload == False:
             Reload(client)
 
-        ch=''
-        if os.name == 'nt': # At the moment this works only in Windows... That's all I need.
-            if msvcrt.kbhit():
-                ch=msvcrt.getch() 
-        else:
-            if kbhit():
-                ch=getch()
-        if ch != '': 
-            print "hai premuto il tasto",ch
-            if ch == 'Q':
-                do_exit=True
-                print "-----------------------------------------------"
-                print "Closing threads... Now you can exit with Ctrl-C"
-            if ch == 'q':
-                DebugOSCsend=0
-                DebugOSCrecv=0
-                DebugMIDIsend=0
-                DebugMIDIrecv=0
-                status()
-            if ch == 'h':
-                help()
-            if ch == 's':
-                status()
-            if ch == 'n':
-                NoReload=True
-                status()
-            if ch == 'r':
-                NoReload=False
-                status()
-            if ch == 'o':
-                DebugOSCsend+=1
-                status()
-            if ch == 'O':
-                DebugOSCrecv+=1
-                status()
-            if ch == 'm':
-                DebugMIDIsend+=1
-                status()
-            if ch == 'M':
-                DebugMIDIrecv+=1
-                status()
-            if ch == 'R':
-                Reload(client,True)
+        try:
+            ch=''
+            if os.name == 'nt': # At the moment this works only in Windows... That's all I need.
+                if msvcrt.kbhit():
+                    ch=msvcrt.getch() 
+            else:
+                if kbhit():
+                    ch=getch()
+            if ch != '': 
+                print "hai premuto il tasto",ch
+                if ch == 'Q':
+                    do_exit=True
+                    print "-----------------------------------------------"
+                    print "Closing threads... Now you can exit with Ctrl-C"
+                if ch == 'q':
+                    DebugOSCsend=0
+                    DebugOSCrecv=0
+                    DebugMIDIsend=0
+                    DebugMIDIrecv=0
+                    status()
+                if ch == 'h':
+                    help()
+                if ch == 's':
+                    status()
+                if ch == 'n':
+                    NoReload=True
+                    status()
+                if ch == 'r':
+                    NoReload=False
+                    status()
+                if ch == 'o':
+                    DebugOSCsend+=1
+                    status()
+                if ch == 'O':
+                    DebugOSCrecv+=1
+                    status()
+                if ch == 'm':
+                    DebugMIDIsend+=1
+                    status()
+                if ch == 'M':
+                    DebugMIDIrecv+=1
+                    status()
+                if ch == 'R':
+                    Reload(client,True)
+
+        except:
+            pass
     exit()
 
 def lcd_status(MidiChannel=0, cc=0, val=0):
@@ -490,27 +490,13 @@ def lcd_status(MidiChannel=0, cc=0, val=0):
     for Bus in range(1,7):
         if ActiveBus == Bus:
             BUS="Bus%d: %s" %(Bus, BusName[Bus])
-    if LCD_I2C:
-        #lcd.lcd_clear()
-        lcd.lcd_string("Bk%d Fx%d"%(Bank,CurrentFx),lcd.LCD_LINE_1)
-        lcd.lcd_string(" "*16,lcd.LCD_LINE_2)
-        lcd.lcd_string("%s"%(BUS),lcd.LCD_LINE_2)
-        #if MidiChannel < 16 and MidiChannel > 0 and cc < 0x100 and cc >= 0 and val < 0x100 and val >= 0 and time.time() - LastMidiEvent > 1: 
-        #    lcd.lcd_puts("Ch%x CC%02x v:%02x"%(MidiChannel,cc,val),2)
-    if PYLCDLIB:
-        #lcd.lcd_clear()
-        lcd.lcd_puts("Bk%d Fx%d"%(Bank,CurrentFx),1)
-        lcd.lcd_puts(" "*16,2)
-        lcd.lcd_puts("%s"%(BUS),2)
-        #if MidiChannel < 16 and MidiChannel > 0 and cc < 0x100 and cc >= 0 and val < 0x100 and val >= 0 and time.time() - LastMidiEvent > 1: 
-        #    lcd.lcd_string("Ch%x CC%02x v:%02x"%(MidiChannel,cc,val),lcd.LCD_LINE_2)
-    if RPI_I2C:
-        #lcd.lcd_clear()
-        lcd.lcd_display_string("Bk%d Fx%d"%(Bank,CurrentFx),1)
-        lcd.lcd_display_string(" "*16,2)
-        lcd.lcd_display_string("%s"%(BUS),2)
-        #if MidiChannel < 16 and MidiChannel > 0 and cc < 0x100 and cc >= 0 and val < 0x100 and val >= 0 and time.time() - LastMidiEvent > 1: 
-        #    lcd.lcd_display_string("Ch%x CC%02x v:%02x"%(MidiChannel,cc,val),2)
+    lcd=lcd_init()
+   #lcd.lcd_clear()
+    lcd.lcd_display_string("Bank=%d Fx=%d"%(Bank,CurrentFx),1)
+    lcd.lcd_display_string(" "*16,2)
+    lcd.lcd_display_string("%s"%(BUS),2)
+    #if MidiChannel < 16 and MidiChannel > 0 and cc < 0x100 and cc >= 0 and val < 0x100 and val >= 0 and time.time() - LastMidiEvent > 1: 
+    #    lcd.lcd_display_string("Ch%x CC%02x v:%02x"%(MidiChannel,cc,val),2)
 def help():
     print "h - this help page"
     print "Q - prepare to quit (close sockets and threads)"
@@ -533,6 +519,7 @@ def status():
     print "VoiceChannel=%d" % VoiceChannel
     print "CurrentFx=%d" % CurrentFx
     print "Bank=%d" % Bank
+    print "ActiveBus=%d" % AciveBus
     print "-------------------------------"
     # TO BE CONTINUED...
 
@@ -908,7 +895,20 @@ def RefreshBCR():
                 sendToMCU(i,Volume[ActiveBus][i+8*Bank-1])
             if Bank == 2:
                 if i <= 5:
-                    sentToMCU(i,FxReturn[0][i-1])
+                    sendToMCU(i,FxReturn[0][i-1])
+
+    if MidiMode == 'MCU':
+        if ActiveBus == 0:
+            midi_out.send_message([0x90,0x33,127])
+        else:
+            midi_out.send_message([0x90,0x33,0])
+        for i in range(1,9):
+            if i == ActiveBus:
+                val=127
+            else:
+                val=0
+            midi_out.send_message([0x90,0x17+i,val])
+
  
    
 
@@ -962,6 +962,16 @@ def MidiCallback(message, time_stamp):
                 RefreshBCR()
             if message[1] == 0x33:
                 ActiveBus=0
+                lcd_status()
+                RefreshBCR()
+            if message[1] == 0x2e and message[2] == 0x7f: # Bank <<
+                Bank-=1
+                if Bank < 0: Bank = 0
+                lcd_status()
+                RefreshBCR()
+            if message[1] == 0x2f and message[2] == 0x7f: # Bank >>
+                Bank+=1
+                if Bank > 2: Bank = 2
                 lcd_status()
                 RefreshBCR()
 
@@ -1201,7 +1211,7 @@ if MidiMode == 'BCR':
     sendToBCR(0,85,0)   # Bank status
 
 threading.Timer(1,Progress,()).start()
-
+RefreshBCR()
 lcd_status()
 parse_messages()
 
