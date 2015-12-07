@@ -545,7 +545,7 @@ def Progress(incremento=127/15):
             sendToBCR(0,85,FlipFlop*127)
  
     elif MidiMode == 'MCU':
-        midi_out.send_message([0x90,95 ,Stat])
+        midi_out.send_message([0x90,95 ,Stat]) # Rec
         if Stat == 0: Stat=127
         else:  Stat=0
 
@@ -609,11 +609,17 @@ def parse_messages():
                 channel=int(addr[5])
                 name=data[0]
                 if DebugOSCrecv > 0: print "Bus %d is named %s" %(channel,name)
-                BusName[channel]=name 
+                if BusName[channel] != name:
+                    BusName[channel]=name
+                    if channel == ActiveBus:
+                        lcd_status()
             elif re.match("/lr/config/name",addr):
                 name=data[0]
                 if DebugOSCrecv > 0: print "Master Bus is named %s" %(name)
-                BusName[0]=name 
+                if BusName[0] != name:
+                    BusName[0]=name 
+                    if ActiveBus == 0:
+                        lcd_status()
                     
             elif re.match("/ch/../mix/../level",addr): # Bus Sends
             # The busses 7-10 are the Fx Return Busses
