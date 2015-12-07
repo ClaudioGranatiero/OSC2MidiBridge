@@ -27,5 +27,6 @@ Now, if you select a Channel, you can change some specific settings for this cha
 - Link
 - LoCut
 - FXinsert
+
 We can use: 9 faders, 3\*9 (21) buttons (Mute, Solo and Rec), 9 RotaryControls
 
