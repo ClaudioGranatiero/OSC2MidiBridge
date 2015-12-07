@@ -1,7 +1,7 @@
 #To Do
 
 ## General
-- refactoring
+- refactoring: abstract content (volume, pan, sends) and implementation (messages to/from MIDI device, messages to/from OSC device) so we can easily change the front-ends (Midi and OSC)
 
 ## BCR2000
 - EQ
