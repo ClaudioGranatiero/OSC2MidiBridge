@@ -56,7 +56,7 @@ BUS_FX_RETURN=-1 # Not Yet Implemented
 BUS_AUX_RETURN=-1 # Not Yet Implemented
 BUS_MASTER=0
 BUS_FX_SENDS=-1 # Not Yet Implemented
-FxShift=0
+Shift=0
 Stat=0
 FlipFlop=0
 VoiceChannel=0
@@ -464,6 +464,7 @@ def request_notifications(client):
 
     while do_exit == False:
         #lcd_status()
+        client.connect((ADDR, PORT_SRV))
         client.send(OSC.OSCMessage("/xremote"))
         time.sleep(WAITRELOAD)
         if NoReload == False:
@@ -527,14 +528,17 @@ def request_notifications(client):
 
 def lcd_status(MidiChannel=0, cc=0, val=0):
     if ActiveBus == 0:
-        BUS="MASTER: %s" % BusName[0]
+        BUS="Master: %s" % BusName[0]
     for Bus in range(1,7):
         if ActiveBus == Bus:
             BUS="Bus%d: %s" %(Bus, BusName[Bus])
     if os.name == 'posix':
         lcd=lcd_init()
        #lcd.lcd_clear()
-        lcd.lcd_display_string("Bank=%d Fx=%d"%(Bank,CurrentFx),1)
+        if Shift == 1:
+            lcd.lcd_display_string("Bank=%d Fx=%d Shft"%(Bank,CurrentFx),1)
+        else:
+            lcd.lcd_display_string("Bank=%d Fx=%d"%(Bank,CurrentFx),1)
         lcd.lcd_display_string(" "*16,2)
         lcd.lcd_display_string("%s"%(BUS),2)
     #if MidiChannel < 16 and MidiChannel > 0 and cc < 0x100 and cc >= 0 and val < 0x100 and val >= 0 and time.time() - LastMidiEvent > 1: 
@@ -720,7 +724,7 @@ def parse_messages():
                     FxParVal[slot-1][par-1][0]=tags
                     FxParVal[slot-1][par-1][1]=val
                 if slot == CurrentFx: #  here we are
-                    index=2+FxParam[FxType[slot-1]].index(par)-6*FxShift
+                    index=2+FxParam[FxType[slot-1]].index(par)-6*Shift
                     if index >=2 and index <= 7:
                         # ie: slot=2, FxType[1]=11, CurrentFx=2, FxParam[11]=[1,4,5,6,7,9,2], par=9 -> send(0xB2,6,val)
                         try:
@@ -856,7 +860,7 @@ def parse_messages():
                                if MidiMode == 'BCR':
                                    sendToBCR(0,72+channel-8*Bank,127) #MIDI ch. 1
                                elif MidiMode == 'MCU':
-                                   pass # Not Yet Implemented
+                                   RefreshController()
                            else:
                                if MidiMode == 'BCR':
                                    sendToBCR(0,72+channel-8*Bank,0) #MIDI ch. 1
@@ -960,16 +964,6 @@ def RefreshController():
                     sendToMCU(i,FxReturn[0][i-1])
 
     if MidiMode == 'MCU':
-        if Bank == 0:
-            midi_out.send_message([0x90,MidiMessages["Prev"],0])
-            midi_out.send_message([0x90,MidiMessages["Next"],0])
-        elif Bank == 1:
-            midi_out.send_message([0x90,MidiMessages["Prev"],127])
-            midi_out.send_message([0x90,MidiMessages["Next"],0])
-        elif Bank == 2:
-            midi_out.send_message([0x90,MidiMessages["Prev"],0])
-            midi_out.send_message([0x90,MidiMessages["Next"],127])
-        
         if ActiveBus == 1:
             midi_out.send_message([0x90,MidiMessages["TrackL"],0])
             midi_out.send_message([0x90,MidiMessages["TrackR"],127])
@@ -979,6 +973,19 @@ def RefreshController():
         else:
             midi_out.send_message([0x90,MidiMessages["TrackL"],0])
             midi_out.send_message([0x90,MidiMessages["TrackR"],0])
+
+        if CurrentFx == 1:
+            midi_out.send_message([0x90,MidiMessages["Prev"],0])
+            midi_out.send_message([0x90,MidiMessages["Next"],0])
+        if CurrentFx == 2:
+            midi_out.send_message([0x90,MidiMessages["Prev"],127])
+            midi_out.send_message([0x90,MidiMessages["Next"],0])
+        if CurrentFx == 3:
+            midi_out.send_message([0x90,MidiMessages["Prev"],0])
+            midi_out.send_message([0x90,MidiMessages["Next"],127])
+        if CurrentFx == 4:
+            midi_out.send_message([0x90,MidiMessages["Prev"],127])
+            midi_out.send_message([0x90,MidiMessages["Next"],127])
 ##    if MidiMode == 'MCU':
 ##        if ActiveBus == 0:
 ##            #midi_out.send_message([0x90,0x33,127])
@@ -1025,13 +1032,13 @@ def RefreshControllerfx():
         tag=FxParVal[CurrentFx-1][i][0]
         val=FxParVal[CurrentFx-1][i][1]
         if DebugOSCrecv > 1: print "i=%d, index=%d, val=%d (%c)" % (i,index,val,tag)
-        if index >= 6*FxShift and index <= 5+6*FxShift:
+        if index >= 6*Shift and index <= 5+6*Shift:
             if MidiMode == 'BCR':
-                sendToBCR(2,2+index-6*FxShift,val) #MIDI ch. 3 NB: in my BCR fx params starts from CC2 (CC1 is faulty!)
-                if DebugMIDIsend > 0: print "Midi send: CC=%d, val=%d, FxShift=%d" % (2+index-7*FxShift,val,FxShift)
+                sendToBCR(2,2+index-6*Shift,val) #MIDI ch. 3 NB: in my BCR fx params starts from CC2 (CC1 is faulty!)
+                if DebugMIDIsend > 0: print "Midi send: CC=%d, val=%d, Shift=%d" % (2+index-7*Shift,val,Shift)
             elif MidiMode == 'MCU':
                 if ActiveBus == BUS_FX_SENDS:
-                    sendToMCU(i,index-6*FxShift,val)
+                    sendToMCU(i,index-6*Shift,val)
 
     RefreshController()
 
@@ -1042,7 +1049,7 @@ def MidiCallback(message, time_stamp):
     global LastMidiEvent
     global CurrentFx
     global Bank
-    global FxShift
+    global Shift
     global Volume
     global Pan
     global Mute
@@ -1074,6 +1081,47 @@ def MidiCallback(message, time_stamp):
 ##                ActiveBus=0
 ##                lcd_status()
 ##                RefreshController()
+
+
+            if message[1] == MidiMessages["Next"] and message[2] == 0x7f:
+                CurrentFx += 1
+                if CurrentFx > 4:
+                    CurrentFx=1
+                lcd_status()
+                oscsend("/fx/%d/type" % CurrentFx) # FX
+                RefreshControllerfx()
+                for i in FxParam[FxType[CurrentFx-1]]:
+                    oscsend("/fx/%d/par/%02d" % (CurrentFx,i)) # FX parameters request
+                    time.sleep(WAITOSC)
+
+            if message[1] == MidiMessages["Prev"] and message[2] == 0x7f:
+                CurrentFx -= 1
+                if CurrentFx < 1:
+                    CurrentFx=4
+                lcd_status()
+                print "CurrentFx=%d" % CurrentFx
+                oscsend("/fx/%d/type" % CurrentFx) # FX
+                RefreshControllerfx()
+                for i in FxParam[FxType[CurrentFx-1]]:
+                    oscsend("/fx/%d/par/%02d" % (CurrentFx,i)) # FX parameters request
+                    time.sleep(WAITOSC)
+
+
+            if message[1] == MidiMessages["Stop"] and message[2] == 0x7f:
+                if Shift == 1:
+                    Shift=0
+                    midi_out.send_message([0x90,MidiMessages["Stop"],0])
+                else:
+                    Shift=1
+                    midi_out.send_message([0x90,MidiMessages["Stop"],127])
+                lcd_status()
+                RefreshControllerfx()
+
+
+
+
+
+
             if message[1] == MidiMessages["TrackL"] and message[2] == 0x7f: # Track <<
                 ActiveBus-=1
                 if ActiveBus < 0: ActiveBus = MAXBUS
@@ -1232,9 +1280,9 @@ def MidiCallback(message, time_stamp):
 
                 if val == 127: # press
                     oscsend("/fx/%d/type" % CurrentFx) # FX
-                    FxShift=1
+                    Shift=1
                 else: # release
-                    FxShift=0
+                    Shift=0
                 RefreshControllerfx()
                 for i in FxParam[FxType[CurrentFx-1]]:
                     oscsend("/fx/%d/par/%02d" % (CurrentFx,i)) # FX parameters request
@@ -1269,7 +1317,7 @@ def MidiCallback(message, time_stamp):
            if cc == 1:
                   print "Faulty Controller!"
            if cc >= 2 and cc <= 7:
-                par=FxParam[FxType[CurrentFx-1]][cc-2+6*FxShift]
+                par=FxParam[FxType[CurrentFx-1]][cc-2+6*Shift]
                 address="/fx/%d/par/%02d" %(CurrentFx,par) #NB: FxType[CurrentFX-1] is the Parameters List of the currently selected FX slot
                                                                                        # cc-2 is the index in the array we are changing
                 # ie: if Type is 11, the row is [1,4,5,6,7,9,2]. If CC is 3, we take the parameter at offset "1" (CC-2), that is "4"
@@ -1387,7 +1435,7 @@ if MidiMode == 'BCR':
     sendToBCR(0,85,0)   # Bank status
 elif MidiMode == 'MCU':
     #for i in range(0,8): midi_out.send_message([0x90,MidiMessages["Arm"]+i,127])
-    midi_out.send_message([0x90,MidiMessages["Zoom"],127])
+    #midi_out.send_message([0x90,MidiMessages["Zoom"],127])
     pass
 threading.Timer(1,Progress,()).start()
 RefreshController()
