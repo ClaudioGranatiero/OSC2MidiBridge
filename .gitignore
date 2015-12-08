@@ -1,2 +1,7 @@
 OSC2MidiBridge_0.0.4.py
 cg.~bcr
+.*.swp
+Osc2MidiBridge_ok.py
+RPi_I2C_driver.pyc
+lcd_i2c.py
+pylcdlib.py
