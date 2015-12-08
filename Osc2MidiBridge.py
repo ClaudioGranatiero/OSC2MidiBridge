@@ -3,6 +3,7 @@
 
 """
 History:
+    2015-12-08: 0.0.15: fixes MCU
     2015-12-07: 0.0.14: MCU messages in dictionary; using "Track" buttons to change ActiveBus
     2015-12-06: 0.0.13: other MCU, fixes
     2015-12-05: 0.0.12: added other MCU implementations; LCD support
@@ -18,7 +19,7 @@ History:
     2015-11-21: 0.0.2: refactoring, configuration file
     2015-11-20: 0.0.1: first working version; FX parameters
 """
-VERSION="0.0.14"
+VERSION="0.0.15"
 LCD_I2C=False
 RPI_I2C=True
 PYLCDLIB=False
@@ -38,7 +39,8 @@ else:
 import ConfigParser
 import ast
 import string
-import RPi_I2C_driver
+if os.name == 'posix':
+    import RPi_I2C_driver
 
 ### Some global variables ###
 CONFIGFILE='osc2midi.ini'
@@ -93,11 +95,24 @@ MidiMessages={"BankL":  0x2e,
               "Solo":   0x08,
               "Mute":   0x10,
               "Mixer":  0x33,
+              "MasterR":0x4a,
+              "MasterW":0x4b,
+              "Rkr":    0x52,
+              "RkrCw":  0x63,
+              "RkrAc":  0x62,
               "Fader":  0xe0,
               "Rec":    0x5f,
               "Unlock": 0x68,
-              "TrackL": UNDEF,
-              "TRackR": UNDEF
+              "TrackL": 0x30,
+              "TrackR": 0x31,
+              "Prev":   0x5b,
+              "Next":   0x5c,
+              "Arm":    0x00,
+              "Zoom":   0x64,
+              "Loop":   0x56,
+              "Stop":   0x5d,
+              "Play":   0x5e,
+              "Pan":    0x10
             }
 
 ### Some safe defaults (overloaded in config file)
@@ -182,7 +197,8 @@ if len(sys.argv) > 2:
          configfile=sys.argv[2] 
 
 def lcd_init():
-    mylcd = RPi_I2C_driver.lcd()
+    if os.name == 'posix':
+        mylcd = RPi_I2C_driver.lcd()
     return(mylcd)
 
 def ReadConfig(Section,Option,Type=None):
@@ -203,11 +219,12 @@ print
 print "Osc2MidiBridge v."+VERSION
 print "------------------------------"
 #           1234567890123456
-lcd=lcd_init()
-lcd.lcd_display_string("Osc2MidiBridge",1)
-lcd.lcd_display_string("%s by CGsoft"%VERSION,2)
-time.sleep(1)
-lcd.lcd_clear()
+if os.name == 'posix':
+    lcd=lcd_init()
+    lcd.lcd_display_string("Osc2MidiBridge",1)
+    lcd.lcd_display_string("%s by CGsoft"%VERSION,2)
+    time.sleep(1)
+    lcd.lcd_clear()
 
 # The config file is searched firs#t in the home directory, then in the current working folder.
 parser = ConfigParser.SafeConfigParser()
@@ -462,6 +479,13 @@ def request_notifications(client):
                     ch=getch()
             if ch != '': 
                 print "hai premuto il tasto",ch
+                if ch == 'L':
+                    print "Midi IN:"
+                    ListMidiPort(midi_in)
+                    print "Midi OUT:"
+                    ListMidiPort(midi_out)
+                if ch == 'D':
+                    Dump()
                 if ch == 'Q':
                     do_exit=True
                     print "-----------------------------------------------"
@@ -507,11 +531,12 @@ def lcd_status(MidiChannel=0, cc=0, val=0):
     for Bus in range(1,7):
         if ActiveBus == Bus:
             BUS="Bus%d: %s" %(Bus, BusName[Bus])
-    lcd=lcd_init()
-   #lcd.lcd_clear()
-    lcd.lcd_display_string("Bank=%d Fx=%d"%(Bank,CurrentFx),1)
-    lcd.lcd_display_string(" "*16,2)
-    lcd.lcd_display_string("%s"%(BUS),2)
+    if os.name == 'posix':
+        lcd=lcd_init()
+       #lcd.lcd_clear()
+        lcd.lcd_display_string("Bank=%d Fx=%d"%(Bank,CurrentFx),1)
+        lcd.lcd_display_string(" "*16,2)
+        lcd.lcd_display_string("%s"%(BUS),2)
     #if MidiChannel < 16 and MidiChannel > 0 and cc < 0x100 and cc >= 0 and val < 0x100 and val >= 0 and time.time() - LastMidiEvent > 1: 
     #    lcd.lcd_display_string("Ch%x CC%02x v:%02x"%(MidiChannel,cc,val),2)
 def help():
@@ -526,6 +551,8 @@ def help():
     print "m - increment DebugMIDIsend"
     print "M - increment DebugMIDIrecv"
     print "s - prints status info"
+    print "D - Dump info"
+    print "L - List MIDI devices"
     print "-------------------------------------------------"
 
 def status():
@@ -834,7 +861,7 @@ def parse_messages():
                                if MidiMode == 'BCR':
                                    sendToBCR(0,72+channel-8*Bank,0) #MIDI ch. 1
                                elif MidiMode == 'MCU':
-                                   RefreshBCR()
+                                   RefreshController()
             
             elif re.match("/-stat/solosw/..",addr):
                 channel=int(addr[14:16])
@@ -848,7 +875,7 @@ def parse_messages():
                         if MidiMode == 'BCR':
                             sendToBCR(0,64+channel-8*Bank,val*127) #MIDI ch. 1, CC 65 - 73
                         elif MidiMode == 'MCU':
-                            RefreshBCR()
+                            RefreshController()
                 
 
     # Setup OSC server & client
@@ -905,7 +932,7 @@ Midi Channel 16: FCB1010 - voice strip (3) -> FX2 return level
     CC 101 -> /ch/03/mix/08/level # FX2 send (Voice)
     CC 102 -> /fx/2/par/01" # FX2 time
 """
-def RefreshBCR():
+def RefreshController():
     for i in range(1,9):
         if MidiMode == 'BCR':
             if Bank < 2:
@@ -932,6 +959,26 @@ def RefreshBCR():
                 if i <= 5:
                     sendToMCU(i,FxReturn[0][i-1])
 
+    if MidiMode == 'MCU':
+        if Bank == 0:
+            midi_out.send_message([0x90,MidiMessages["Prev"],0])
+            midi_out.send_message([0x90,MidiMessages["Next"],0])
+        elif Bank == 1:
+            midi_out.send_message([0x90,MidiMessages["Prev"],127])
+            midi_out.send_message([0x90,MidiMessages["Next"],0])
+        elif Bank == 2:
+            midi_out.send_message([0x90,MidiMessages["Prev"],0])
+            midi_out.send_message([0x90,MidiMessages["Next"],127])
+        
+        if ActiveBus == 1:
+            midi_out.send_message([0x90,MidiMessages["TrackL"],0])
+            midi_out.send_message([0x90,MidiMessages["TrackR"],127])
+        elif ActiveBus == 2:
+            midi_out.send_message([0x90,MidiMessages["TrackL"],127])
+            midi_out.send_message([0x90,MidiMessages["TrackR"],0])
+        else:
+            midi_out.send_message([0x90,MidiMessages["TrackL"],0])
+            midi_out.send_message([0x90,MidiMessages["TrackR"],0])
 ##    if MidiMode == 'MCU':
 ##        if ActiveBus == 0:
 ##            #midi_out.send_message([0x90,0x33,127])
@@ -947,10 +994,32 @@ def RefreshBCR():
 ##            #midi_out.send_message([0x90,0x17+i,val])
 ##            midi_out.send_message([0x90,MidiMessages["Sel"]+i-1,val])
 
- 
-   
 
-def RefreshBCRfx():
+
+
+##    if MidiMode == 'MCU':
+##        if ActiveBus == 0:
+##            #midi_out.send_message([0x90,0x33,127])
+##            midi_out.send_message([0x90,MidiMessages["Mixer"],127])
+##        else:
+##            #midi_out.send_message([0x90,0x33,0])
+##            midi_out.send_message([0x90,MidiMessages["Mixer"],0])
+##        for i in range(1,9):
+##            if i == ActiveBus:
+##                val=127
+##            else:
+##                val=0
+##            #midi_out.send_message([0x90,0x17+i,val])
+##            midi_out.send_message([0x90,MidiMessages["Sel"]+i-1,val])
+
+
+def Dump():
+    print "******************************"
+    print "Dump internal values:"
+    for i in range(0,16):
+        print "Channel %02d: Vol=%02x, Pan=%02x, Mute=%02x, Solo=%02x" % (i+1,Volume[0][i],Pan[i], Mute[i], Solo[i])
+
+def RefreshControllerfx():
     for i in range(0,12):
         index=FxParam[FxType[CurrentFx-1]].index(FxParam[CurrentFx-1][i])
         tag=FxParVal[CurrentFx-1][i][0]
@@ -964,7 +1033,7 @@ def RefreshBCRfx():
                 if ActiveBus == BUS_FX_SENDS:
                     sendToMCU(i,index-6*FxShift,val)
 
-    RefreshBCR()
+    RefreshController()
 
 def MidiCallback(message, time_stamp):
     """
@@ -999,22 +1068,22 @@ def MidiCallback(message, time_stamp):
                 #ActiveBus=message[1]-0x17
 ##                ActiveBus=message[1]-MidiMessages["Sel"]+1
 ##                lcd_status()
-##                RefreshBCR()
+##                RefreshController()
             #if message[1] == 0x33:
 ##            if message[1] == MidiMessages["Mixer"]:
 ##                ActiveBus=0
 ##                lcd_status()
-##                RefreshBCR()
+##                RefreshController()
             if message[1] == MidiMessages["TrackL"] and message[2] == 0x7f: # Track <<
                 ActiveBus-=1
                 if ActiveBus < 0: ActiveBus = MAXBUS
                 lcd_status()
-                RefreshBCR()
+                RefreshController()
             if message[1] == MidiMessages["TrackR"] and message[2] == 0x7f: # Track >>
                 ActiveBus+=1
                 if ActiveBus > MAXBUS: ActiveBus = 0
                 lcd_status()
-                RefreshBCR()
+                RefreshController()
 
 
             #if message[1] == 0x2e and message[2] == 0x7f: # Bank <<
@@ -1022,15 +1091,16 @@ def MidiCallback(message, time_stamp):
                 Bank-=1
                 if Bank < 0: Bank = 0
                 lcd_status()
-                RefreshBCR()
+                RefreshController()
             #if message[1] == 0x2f and message[2] == 0x7f: # Bank >>
             if message[1] == MidiMessages["BankR"] and message[2] == 0x7f: # Bank >>
                 Bank+=1
                 if Bank > 2: Bank = 2
                 lcd_status()
-                RefreshBCR()
+                RefreshController()
             #if message[1] >= 0x8 and message[1] <= 0xf and message[2] == 0x7f: # solo
-            if message[1] >= MidiMessages["Solo"] and message[1] <= MidiMessages["Solo"]+8 and message[2] == 0x7f: # solo
+
+            if message[1] >= MidiMessages["Solo"] and message[1] < MidiMessages["Solo"]+8 and message[2] == 0x7f: # solo
                 if Bank < 2:
                     #cc=message[1]-0x7
                     cc=message[1]-MidiMessages["Solo"]+1
@@ -1040,10 +1110,10 @@ def MidiCallback(message, time_stamp):
                     address="/-stat/solosw/%02d" % (cc+8*Bank)
                     Solo[cc+8*Bank-1]=val
                     lcd_status()
-                    RefreshBCR()
+                    RefreshController()
                     
             #if message[1] >= 0x10 and message[1] <= 0x17 and message[2] == 0x7f: # Mute
-            if message[1] >= MidiMessages["Mute"] and message[1] <= MidiMessages["Mute"]+8 and message[2] == 0x7f: # Mute
+            if message[1] >= MidiMessages["Mute"] and message[1] < MidiMessages["Mute"]+8 and message[2] == 0x7f: # Mute
                 if Bank < 2:
                     #cc=message[1]-0x0f
                     cc=message[1]-MidiMessages["Mute"]+1
@@ -1055,11 +1125,22 @@ def MidiCallback(message, time_stamp):
                     else: val=127
                     Mute[cc+8*Bank-1]=val
                     lcd_status()
-                    RefreshBCR()
+                    RefreshController()
+
+        if message[0] == 0xb0:
+            if message[1] >= MidiMessages["Pan"] and message[1] < MidiMessages["Pan"]+8: # Pan
+                cc=message[1] - MidiMessages["Pan"]+1
+                if message[2] < 0x40:
+                    val=message[2]
+                else:
+                    val=0x40-message[2]
+                Pan[cc+8*Bank -1] += val
+                address="/ch/%02d/mix/pan" % (cc+8*Bank)
+                val=Pan[cc+8*Bank-1]
 
 
         #if message[0] >= 0xe0 and message[0] <= 0xe8: # Fader
-        if message[0] >= MidiMessages["Fader"] and message[0] <= MidiMessages["Fader"]+8: # Fader
+        if message[0] >= MidiMessages["Fader"] and message[0] < MidiMessages["Fader"]+8: # Fader
             #cc=message[0]-0xdf
             cc=message[0]-MidiMessages["Fader"]+1
             val=message[1]
@@ -1085,10 +1166,10 @@ def MidiCallback(message, time_stamp):
                     if cc == 5:
                         address="/rtn/aux/mix/01/level" 
                     FxReturn[1][cc-1]=val
-            if DebugMIDIrecv > 0:
+            if DebugMIDIsend > 0:
                 print "address=",address
             
-            RefreshBCR()
+            RefreshController()
 ###### BCR2000 ######
 
     if MidiMode == 'BCR' and int(message[0]) >= 0xB0 and int(message[0]) <= 0xBF: # at the moment we'll process only ContinousControls (CC).
@@ -1154,7 +1235,7 @@ def MidiCallback(message, time_stamp):
                     FxShift=1
                 else: # release
                     FxShift=0
-                RefreshBCRfx()
+                RefreshControllerfx()
                 for i in FxParam[FxType[CurrentFx-1]]:
                     oscsend("/fx/%d/par/%02d" % (CurrentFx,i)) # FX parameters request
                     time.sleep(WAITOSC)
@@ -1165,7 +1246,7 @@ def MidiCallback(message, time_stamp):
                     Bank=0
                 lcd_status()
 
-                RefreshBCR()
+                RefreshController()
 
 
 
@@ -1239,7 +1320,17 @@ def MidiCallback(message, time_stamp):
                 oscsend(address,float(val)/127)
         except:
             oscsend(address,int(val))
-        
+ 
+def ListMidiPort(midi_port ):
+    """
+    Helper function to open midi device
+    """
+    i=0
+    for port_name in midi_port.ports:
+        print "    ",i,": ",port_name
+        i=i+1
+
+       
 def OpenMidiPort(name,midi_port, descr="Devices"):
     """
     Helper function to open midi device
@@ -1294,9 +1385,12 @@ if MidiMode == 'BCR':
     sendToBCR(0,84,0)   #MIDI ch. 1, CC84, off
     sendToBCR(0,80+CurrentFx,127) #MIDI ch. 1, CC81, on (se CurrentFx = 1)
     sendToBCR(0,85,0)   # Bank status
-
+elif MidiMode == 'MCU':
+    #for i in range(0,8): midi_out.send_message([0x90,MidiMessages["Arm"]+i,127])
+    midi_out.send_message([0x90,MidiMessages["Zoom"],127])
+    pass
 threading.Timer(1,Progress,()).start()
-RefreshBCR()
+RefreshController()
 lcd_status()
 parse_messages()
 
