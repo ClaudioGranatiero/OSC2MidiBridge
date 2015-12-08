@@ -3,6 +3,7 @@
 
 """
 History:
+    2015-12-07: 0.0.14: MCU messages in dictionary; using "Track" buttons to change ActiveBus
     2015-12-06: 0.0.13: other MCU, fixes
     2015-12-05: 0.0.12: added other MCU implementations; LCD support
     2015-12-04: 0.0.11: refactoring, some MCU implementation
@@ -17,7 +18,7 @@ History:
     2015-11-21: 0.0.2: refactoring, configuration file
     2015-11-20: 0.0.1: first working version; FX parameters
 """
-VERSION="0.0.13"
+VERSION="0.0.14"
 LCD_I2C=False
 RPI_I2C=True
 PYLCDLIB=False
@@ -84,7 +85,20 @@ FxParVal=[ # [type, value] for 16 parameters
             [['i',1],['i',2],['i',3],['i',4],['i',5],['i',6],['i',7],['i',8],['i',9],['i',10],['i',11],['i',12],['i',13],['i',14],['i',15],['i',16]], # Fx4
          ]
 
-
+MAXBUS=8
+# MCU Midi
+MidiMessages={"BankL":  0x2e,
+              "BankR":  0x2f,
+              "Sel":    0x18,
+              "Solo":   0x08,
+              "Mute":   0x10,
+              "Mixer":  0x33,
+              "Fader":  0xe0,
+              "Rec":    0x5f,
+              "Unlock": 0x68,
+              "TrackL": UNDEF,
+              "TRackR": UNDEF
+            }
 
 ### Some safe defaults (overloaded in config file)
 MIDINAME="BCR2000 port 1"
@@ -317,9 +331,12 @@ if os.name != 'nt':
         pass
 
 def sendToMCU(fader,val):
-    midi_out.send_message([0x90,0x67+fader,127]) # unlock fader
-    midi_out.send_message([0xDF+fader ,val,val]) # move fader
-    midi_out.send_message([0x90,0x67+fader ,0])  # lock fader
+    midi_out.send_message([0x90,MidiMessages["Unlock"]+fader,127]) # unlock fader
+    midi_out.send_message([MidiMessages["Fader"]+fader-1 ,val,val]) # move fader
+    midi_out.send_message([0x90,MidiMessages["Unlock"]+fader ,0])  # lock fader
+#    midi_out.send_message([0x90,0x67+fader,127]) # unlock fader
+#    midi_out.send_message([0xDF+fader ,val,val]) # move fader
+#    midi_out.send_message([0x90,0x67+fader ,0])  # lock fader
 
 def sendToBCR(channel,slot,val):
     if MidiMode == 'BCR':
@@ -545,7 +562,8 @@ def Progress(incremento=127/15):
             sendToBCR(0,85,FlipFlop*127)
  
     elif MidiMode == 'MCU':
-        midi_out.send_message([0x90,95 ,Stat]) # Rec
+        #midi_out.send_message([0x90,95 ,Stat]) # Rec
+        midi_out.send_message([0x90,MidiMessages["Rec"] ,Stat]) # Rec
         if Stat == 0: Stat=127
         else:  Stat=0
 
@@ -906,23 +924,28 @@ def RefreshBCR():
         elif MidiMode == 'MCU':
             if Bank < 2:
                 sendToMCU(i,Volume[ActiveBus][i+8*Bank-1])
-                midi_out.send_message([0x90,0x07+i,Solo[i+8*Bank-1]])
-                midi_out.send_message([0x90,0x0f+i,Mute[i+8*Bank-1]])
+                #midi_out.send_message([0x90,0x07+i,Solo[i+8*Bank-1]])
+                midi_out.send_message([0x90,MidiMessages["Solo"]+i-1,Solo[i+8*Bank-1]])
+                #midi_out.send_message([0x90,0x0f+i,Mute[i+8*Bank-1]])
+                midi_out.send_message([0x90,MidiMessages["Mute"]+i-1,Mute[i+8*Bank-1]])
             if Bank == 2:
                 if i <= 5:
                     sendToMCU(i,FxReturn[0][i-1])
 
-    if MidiMode == 'MCU':
-        if ActiveBus == 0:
-            midi_out.send_message([0x90,0x33,127])
-        else:
-            midi_out.send_message([0x90,0x33,0])
-        for i in range(1,9):
-            if i == ActiveBus:
-                val=127
-            else:
-                val=0
-            midi_out.send_message([0x90,0x17+i,val])
+##    if MidiMode == 'MCU':
+##        if ActiveBus == 0:
+##            #midi_out.send_message([0x90,0x33,127])
+##            midi_out.send_message([0x90,MidiMessages["Mixer"],127])
+##        else:
+##            #midi_out.send_message([0x90,0x33,0])
+##            midi_out.send_message([0x90,MidiMessages["Mixer"],0])
+##        for i in range(1,9):
+##            if i == ActiveBus:
+##                val=127
+##            else:
+##                val=0
+##            #midi_out.send_message([0x90,0x17+i,val])
+##            midi_out.send_message([0x90,MidiMessages["Sel"]+i-1,val])
 
  
    
@@ -971,27 +994,46 @@ def MidiCallback(message, time_stamp):
 ##### iControlPro ####
     if MidiMode == 'MCU':
         if message[0] == 0x90:
-            if message[1] >= 0x18 and message[1] <= 0x1f: # Sel Button
-                ActiveBus=message[1]-0x17
+            #if message[1] >= 0x18 and message[1] <= 0x1f: # Sel Button
+##            if message[1] >= MidiMessages["Sel"] and message[1] <= MidiMessages["Sel"]+8: # Sel Button
+                #ActiveBus=message[1]-0x17
+##                ActiveBus=message[1]-MidiMessages["Sel"]+1
+##                lcd_status()
+##                RefreshBCR()
+            #if message[1] == 0x33:
+##            if message[1] == MidiMessages["Mixer"]:
+##                ActiveBus=0
+##                lcd_status()
+##                RefreshBCR()
+            if message[1] == MidiMessages["TrackL"] and message[2] == 0x7f: # Track <<
+                ActiveBus-=1
+                if ActiveBus < 0: ActiveBus = MAXBUS
                 lcd_status()
                 RefreshBCR()
-            if message[1] == 0x33:
-                ActiveBus=0
+            if message[1] == MidiMessages["TrackR"] and message[2] == 0x7f: # Track >>
+                ActiveBus+=1
+                if ActiveBus > MAXBUS: ActiveBus = 0
                 lcd_status()
                 RefreshBCR()
-            if message[1] == 0x2e and message[2] == 0x7f: # Bank <<
+
+
+            #if message[1] == 0x2e and message[2] == 0x7f: # Bank <<
+            if message[1] == MidiMessages["BankL"] and message[2] == 0x7f: # Bank <<
                 Bank-=1
                 if Bank < 0: Bank = 0
                 lcd_status()
                 RefreshBCR()
-            if message[1] == 0x2f and message[2] == 0x7f: # Bank >>
+            #if message[1] == 0x2f and message[2] == 0x7f: # Bank >>
+            if message[1] == MidiMessages["BankR"] and message[2] == 0x7f: # Bank >>
                 Bank+=1
                 if Bank > 2: Bank = 2
                 lcd_status()
                 RefreshBCR()
-            if message[1] >= 0x8 and message[1] <= 0xf and message[2] == 0x7f: # solo
+            #if message[1] >= 0x8 and message[1] <= 0xf and message[2] == 0x7f: # solo
+            if message[1] >= MidiMessages["Solo"] and message[1] <= MidiMessages["Solo"]+8 and message[2] == 0x7f: # solo
                 if Bank < 2:
-                    cc=message[1]-0x7
+                    #cc=message[1]-0x7
+                    cc=message[1]-MidiMessages["Solo"]+1
                     val=Solo[cc+8*Bank-1]
                     if val == 0: val = 127
                     else: val = 0
@@ -1000,9 +1042,11 @@ def MidiCallback(message, time_stamp):
                     lcd_status()
                     RefreshBCR()
                     
-            if message[1] >= 0x10 and message[1] <= 0x17 and message[2] == 0x7f: # Mute
+            #if message[1] >= 0x10 and message[1] <= 0x17 and message[2] == 0x7f: # Mute
+            if message[1] >= MidiMessages["Mute"] and message[1] <= MidiMessages["Mute"]+8 and message[2] == 0x7f: # Mute
                 if Bank < 2:
-                    cc=message[1]-0x0f
+                    #cc=message[1]-0x0f
+                    cc=message[1]-MidiMessages["Mute"]+1
                     val=Mute[cc+8*Bank-1]
                     if val == 0: val = 127
                     else: val = 0
@@ -1014,8 +1058,10 @@ def MidiCallback(message, time_stamp):
                     RefreshBCR()
 
 
-        if message[0] >= 0xe0 and message[0] <= 0xe8: # Fader
-            cc=message[0]-0xdf
+        #if message[0] >= 0xe0 and message[0] <= 0xe8: # Fader
+        if message[0] >= MidiMessages["Fader"] and message[0] <= MidiMessages["Fader"]+8: # Fader
+            #cc=message[0]-0xdf
+            cc=message[0]-MidiMessages["Fader"]+1
             val=message[1]
             if DebugMIDIrecv > 0:
                 print "#",cc," =",val
