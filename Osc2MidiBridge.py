@@ -20,9 +20,6 @@ History:
     2015-11-20: 0.0.1: first working version; FX parameters
 """
 VERSION="0.0.15"
-LCD_I2C=False
-RPI_I2C=True
-PYLCDLIB=False
 
 import rtmidi_python as rtmidi
 import time
@@ -39,7 +36,7 @@ else:
 import ConfigParser
 import ast
 import string
-if os.name == 'posix':
+if os.name == 'posix' and os.uname()[1] == 'raspberrypi':
     import RPi_I2C_driver
 
 ### Some global variables ###
@@ -90,7 +87,8 @@ FxParVal=[ # [type, value] for 16 parameters
          ]
 
 MAXBUS=8
-# MCU Midi
+
+# MCU Midi (iCon iControlPro):
 MidiMessages={"BankL":  0x2e,
               "BankR":  0x2f,
               "Sel":    0x18,
@@ -199,19 +197,36 @@ if len(sys.argv) > 2:
          configfile=sys.argv[2] 
 
 def lcd_init():
-    if os.name == 'posix':
+    if os.name == 'posix' and os.uname()[1] == 'raspberrypi':
         mylcd = RPi_I2C_driver.lcd()
     return(mylcd)
 
 def ReadConfig(Section,Option,Type=None):
-    if Type == 'int':
-        retval=parser.getint(Section,Option)
-    elif Type == 'float':
-        retval=parser.getfloat(Section,Option)
-    elif Type == 'bool':
-        retval=parser.getboolean(Section,Option)
-    else:
-        retval=parser.get(Section,Option)
+    retval=""
+    try:
+        if Type == 'int':
+            retval=parser.getint(Section,Option)
+        elif Type == 'float':
+            retval=parser.getfloat(Section,Option)
+        elif Type == 'bool':
+            retval=parser.getboolean(Section,Option)
+        else:
+            retval=parser.get(Section,Option)
+    except ConfigParser.NoSectionError,err:
+        print "Exception raised when a specified section is not found."
+        print "ERROR:",err
+        pass
+
+    except ConfigParser.DuplicateSectionError,err:
+        print "Exception raised if add_section() is called with the name of a section that is already present."
+        print "ERROR:",err
+        pass
+
+    except ConfigParser.NoOptionError,err:
+        print "Exception raised when a specified option is not found in the specified section."
+        print "ERROR:",err
+        pass
+
     out="ReadConfig: [%s] %s = " % (Section,Option)
     print out,retval
     return retval
@@ -221,7 +236,7 @@ print
 print "Osc2MidiBridge v."+VERSION
 print "------------------------------"
 #           1234567890123456
-if os.name == 'posix':
+if os.name == 'posix' and os.uname()[1] == 'raspberrypi':
     lcd=lcd_init()
     lcd.lcd_display_string("Osc2MidiBridge",1)
     lcd.lcd_display_string("%s by CGsoft"%VERSION,2)
@@ -240,42 +255,26 @@ if configfile == '':
 print "ConfigFile: ",configfile
         
 if parser.read(configfile) != None:
-    try:
-        MIDINAME=ReadConfig('MIDI', 'DeviceName')
-        MIDINAME2=ReadConfig('MIDI', 'DeviceName2')
-        ADDR=ReadConfig('OSC', 'Address')
-        PORT_SRV=ReadConfig('OSC', 'ServerPort','int')
-        PORT_CLN=ReadConfig('OSC', 'ClientPort','int')
-        WAITOSC=ReadConfig('OSC', 'Wait','float')
-        WAITMIDI=ReadConfig('MIDI', 'Wait','float')
-        WAITRELOAD=ReadConfig('OSC2Midi', 'WaitReload','float')
-        CurrentFx=ReadConfig('OSC2Midi','CurrentFx','int')
-        FxParam=ast.literal_eval(ReadConfig('OSC2Midi', "FxParam"))
-        ReloadMasterLevels=ReadConfig('OSC2Midi','ReloadMasterLevels','bool')
-        ReloadMasterMute=ReadConfig('OSC2Midi','ReloadMasterMute','bool')
-        ReloadMasterPan=ReadConfig('OSC2Midi','ReloadMasterPan','bool')
-        ReloadMasterSolo=ReadConfig('OSC2Midi','ReloadMasterSolo','bool')
-        ReloadBus1Levels=ReadConfig('OSC2Midi','ReloadBus1Levels','bool')
-        ReloadBus2Levels=ReadConfig('OSC2Midi','ReloadBus2Levels','bool')    
-        ReloadFxType=ReadConfig('OSC2Midi','ReloadFxType','bool')
-        ReloadFxParams=ReadConfig('OSC2Midi','ReloadFxParams','bool')
-        NoReload=ReadConfig('OSC2Midi','NoReload','bool')
-        MidiMode=ReadConfig('MIDI','Mode')
-
-    except ConfigParser.NoSectionError,err:
-        print "Exception raised when a specified section is not found."
-        print "ERROR:",err
-        pass
-
-    except ConfigParser.DuplicateSectionError,err:
-        print "Exception raised if add_section() is called with the name of a section that is already present."
-        print "ERROR:",err
-        pass
-
-    except ConfigParser.NoOptionError,err:
-        print "Exception raised when a specified option is not found in the specified section."
-        print "ERROR:",err
-        pass
+    MIDINAME=ReadConfig('MIDI', 'DeviceName')
+    MIDINAME2=ReadConfig('MIDI', 'DeviceName2')
+    ADDR=ReadConfig('OSC', 'Address')
+    PORT_SRV=ReadConfig('OSC', 'ServerPort','int')
+    PORT_CLN=ReadConfig('OSC', 'ClientPort','int')
+    WAITOSC=ReadConfig('OSC', 'Wait','float')
+    WAITMIDI=ReadConfig('MIDI', 'Wait','float')
+    WAITRELOAD=ReadConfig('OSC2Midi', 'WaitReload','float')
+    CurrentFx=ReadConfig('OSC2Midi','CurrentFx','int')
+    FxParam=ast.literal_eval(ReadConfig('OSC2Midi', "FxParam"))
+    ReloadMasterLevels=ReadConfig('OSC2Midi','ReloadMasterLevels','bool')
+    ReloadMasterMute=ReadConfig('OSC2Midi','ReloadMasterMute','bool')
+    ReloadMasterPan=ReadConfig('OSC2Midi','ReloadMasterPan','bool')
+    ReloadMasterSolo=ReadConfig('OSC2Midi','ReloadMasterSolo','bool')
+    ReloadBus1Levels=ReadConfig('OSC2Midi','ReloadBus1Levels','bool')
+    ReloadBus2Levels=ReadConfig('OSC2Midi','ReloadBus2Levels','bool')    
+    ReloadFxType=ReadConfig('OSC2Midi','ReloadFxType','bool')
+    ReloadFxParams=ReadConfig('OSC2Midi','ReloadFxParams','bool')
+    NoReload=ReadConfig('OSC2Midi','NoReload','bool')
+    MidiMode=ReadConfig('MIDI','Mode')
 else:
     print "Config file not found..."
     
@@ -353,9 +352,6 @@ def sendToMCU(fader,val):
     midi_out.send_message([0x90,MidiMessages["Unlock"]+fader,127]) # unlock fader
     midi_out.send_message([MidiMessages["Fader"]+fader-1 ,val,val]) # move fader
     midi_out.send_message([0x90,MidiMessages["Unlock"]+fader ,0])  # lock fader
-#    midi_out.send_message([0x90,0x67+fader,127]) # unlock fader
-#    midi_out.send_message([0xDF+fader ,val,val]) # move fader
-#    midi_out.send_message([0x90,0x67+fader ,0])  # lock fader
 
 def sendToBCR(channel,slot,val):
     if MidiMode == 'BCR':
@@ -534,7 +530,7 @@ def lcd_status(MidiChannel=0, cc=0, val=0):
     for Bus in range(1,7):
         if ActiveBus == Bus:
             BUS="Bus%d: %s" %(Bus, BusName[Bus])
-    if os.name == 'posix':
+    if os.name == 'posix' and os.uname()[1] == 'raspberrypi':
         lcd=lcd_init()
        #lcd.lcd_clear()
         if Shift == 1:
@@ -575,8 +571,9 @@ def status():
 
 def Progress(incremento=127/15):
     """
-    Show a moving led on MidiChannel3, CC1 (it's a faulty rotary controller on my BCR2000), 
+    In BCR Mode, show a moving led on MidiChannel3, CC1 (it's a faulty rotary controller on my BCR2000), 
     then update status of ledbutton in MidiChannel1,CC85 (Bank Select): Off=Bank0, On=Bank1, Blink=Bank2
+    In MCU Mode show a blinking "Rec" button
     """
     global Stat
     global FlipFlop
@@ -1110,7 +1107,7 @@ def MidiCallback(message, time_stamp):
 
             if message[1] == MidiMessages["Rec"] and message[2] == 0x7f:
                 do_exit=True
-                if os.name == 'posix':
+                if os.name == 'posix' and os.uname()[1] == 'raspberrypi':
 #                                           1234567890123456
                     lcd.lcd_display_string("Exiting...      ",1)
                     lcd.lcd_display_string("Bye             ",2)
