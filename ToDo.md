@@ -10,7 +10,6 @@
 - Selecting input (A/D, USB)
 
 ## iControlPro
-- Pan
 - Fx parameters
 - EQ
 - Compressor
