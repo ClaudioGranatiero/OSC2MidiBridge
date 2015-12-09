@@ -69,17 +69,19 @@ FxReturn=[ #Fx1, Fx2, Fx3, Fx4, Aux
             [0,0,0,0,0]  # Bus2
         ]
 Volume=[ # 16 channels
-        [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16], # Main LR
-        [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16], # Bus1
-        [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16], # Bus2
-        [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16], # Fx1
-        [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16], # Fx2
-        [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16], # Fx3
-        [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16], # Fx4
+#        1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2
+        [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], # Main LR
+        [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], # Bus1
+        [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], # Bus2
+        [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], # Fx1
+        [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], # Fx2
+        [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], # Fx3
+        [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0], # Fx4
        ]
-Pan=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16] # 16 channels
-Mute=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]
-Solo=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]
+Pan=[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+#     1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2
+Mute=[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+Solo=[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
 FxParVal=[ # [type, value] for 16 parameters
             [['i',1],['i',2],['i',3],['i',4],['i',5],['i',6],['i',7],['i',8],['i',9],['i',10],['i',11],['i',12],['i',13],['i',14],['i',15],['i',16]], # Fx1
             [['i',1],['i',2],['i',3],['i',4],['i',5],['i',6],['i',7],['i',8],['i',9],['i',10],['i',11],['i',12],['i',13],['i',14],['i',15],['i',16]], # Fx2
@@ -846,6 +848,27 @@ def parse_messages():
                         elif MidiMode == 'MCU':
                             pass # Not Yet Implemented
 
+            elif re.match("/rtn/./mix/on",addr):
+                   val=int(data[0])
+                   channel=int(addr[5])
+                   if channel >= 1 and channel <= 5:
+                       if val == 0:
+                           Mute[channel-1+16]=127
+                       else:
+                           Mute[channel-1+16]=0
+                   if Bank == 2:
+                       if channel >= 1 and channel <= 5:
+                           if int(data[0]) == 0:
+                               if MidiMode == 'BCR':
+                                   sendToBCR(0,72+channel,127) #MIDI ch. 1
+                               elif MidiMode == 'MCU':
+                                   RefreshController()
+                           else:
+                               if MidiMode == 'BCR':
+                                   sendToBCR(0,72+channel,0) #MIDI ch. 1
+                               elif MidiMode == 'MCU':
+                                   RefreshController()
+ 
             elif re.match("/ch/../mix/on",addr):
                    val=int(data[0])
                    channel=int(addr[4:6])
@@ -952,6 +975,7 @@ def RefreshController():
                     sendToBCR(0,i,FxReturn[0][i-1])
                     sendToBCR(1,i,FxReturn[1][i-1])
                     sendToBCR(3,i,FxReturn[2][i-1])
+                    sendToBCR(0,72+i,Mute[i+15]) #MIDI ch. 1
         elif MidiMode == 'MCU':
             if Bank < 2:
                 sendToMCU(i,Volume[ActiveBus][i+8*Bank-1])
@@ -962,6 +986,7 @@ def RefreshController():
             if Bank == 2:
                 if i <= 5:
                     sendToMCU(i,FxReturn[0][i-1])
+                    midi_out.send_message([0x90,MidiMessages["Mute"]+i-1,Mute[i+15]])
 
     if MidiMode == 'MCU':
         if ActiveBus == 1:
@@ -1057,6 +1082,7 @@ def MidiCallback(message, time_stamp):
     global FxParVal
     global FxReturn
     global ActiveBus
+    global do_exit
     
     cc=0
     val=0
@@ -1082,6 +1108,15 @@ def MidiCallback(message, time_stamp):
 ##                lcd_status()
 ##                RefreshController()
 
+            if message[1] == MidiMessages["Rec"] and message[2] == 0x7f:
+                do_exit=True
+                if os.name == 'posix':
+#                                           1234567890123456
+                    lcd.lcd_display_string("Exiting...      ",1)
+                    lcd.lcd_display_string("Bye             ",2)
+                time.sleep(1)
+                os.system("killall Osc2MidiBridge.py")
+                exit()
 
             if message[1] == MidiMessages["Next"] and message[2] == 0x7f:
                 CurrentFx += 1
@@ -1162,18 +1197,21 @@ def MidiCallback(message, time_stamp):
                     
             #if message[1] >= 0x10 and message[1] <= 0x17 and message[2] == 0x7f: # Mute
             if message[1] >= MidiMessages["Mute"] and message[1] < MidiMessages["Mute"]+8 and message[2] == 0x7f: # Mute
+                 #cc=message[1]-0x0f
+                cc=message[1]-MidiMessages["Mute"]+1
+                val=Mute[cc+8*Bank-1]
+               # if val == 0: val = 127
+               # else: val = 0
+               # if val > 0: val=0
+               # else: val=127
+                Mute[cc+8*Bank-1]=val
+                lcd_status()
+                RefreshController()
                 if Bank < 2:
-                    #cc=message[1]-0x0f
-                    cc=message[1]-MidiMessages["Mute"]+1
-                    val=Mute[cc+8*Bank-1]
-                    if val == 0: val = 127
-                    else: val = 0
                     address="/ch/%02d/mix/on" % (cc+8*Bank)
-                    if val > 0: val=0
-                    else: val=127
-                    Mute[cc+8*Bank-1]=val
-                    lcd_status()
-                    RefreshController()
+                elif Bank == 2: # FxReturn!
+                    if cc >= 1 and cc <= 5:
+                        address="/rtn/%d/mix/on" % (cc)
 
         if message[0] == 0xb0:
             if message[1] >= MidiMessages["Pan"] and message[1] < MidiMessages["Pan"]+8: # Pan
