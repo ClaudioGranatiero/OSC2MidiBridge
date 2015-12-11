@@ -66,7 +66,6 @@ FxReturn=[ #Fx1, Fx2, Fx3, Fx4, Aux
             [0]*5, # Bus2
         ]
 Volume=[ # 16 channels
-#        1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2
         [0]*32, # Main LR
         [0]*32, # Bus1
         [0]*32, # Bus2
@@ -79,12 +78,15 @@ Volume=[ # 16 channels
 Pan= [0]*32
 Mute= [0]*32
 Solo= [0]*32
-FxParVal=[ # [type, value] for 32 parameters
-            [['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],], # Fx1
-            [['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],], # Fx2
-            [['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],], # Fx3
-            [['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],], # Fx4
-         ]
+#FxParVal=[ # [type, value] for 32 parameters
+#            [['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],], # Fx1
+#            [['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],], # Fx2
+#            [['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],], # Fx3
+#            [['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],], # Fx4
+#         ]
+FxParVal=[
+            [['i',0]]*32
+         ]*4
 
 MAXBUS=8
 
@@ -133,7 +135,7 @@ ReloadMasterMute=True
 ReloadMasterPan=True
 ReloadMasterSolo=True
 ReloadBus1Levels=True
-ReloadBus2Levels=True    
+ReloadBus2Levels=True
 ReloadFxType=True
 ReloadFxParams=True
 
@@ -253,7 +255,7 @@ if configfile == '':
         configfile=CONFIGFILE
 
 print "ConfigFile: ",configfile
-        
+
 if parser.read(configfile) != None:
     MIDINAME=ReadConfig('MIDI', 'DeviceName')
     MIDINAME2=ReadConfig('MIDI', 'DeviceName2')
@@ -270,7 +272,7 @@ if parser.read(configfile) != None:
     ReloadMasterPan=ReadConfig('OSC2Midi','ReloadMasterPan','bool')
     ReloadMasterSolo=ReadConfig('OSC2Midi','ReloadMasterSolo','bool')
     ReloadBus1Levels=ReadConfig('OSC2Midi','ReloadBus1Levels','bool')
-    ReloadBus2Levels=ReadConfig('OSC2Midi','ReloadBus2Levels','bool')    
+    ReloadBus2Levels=ReadConfig('OSC2Midi','ReloadBus2Levels','bool')
     ReloadFxType=ReadConfig('OSC2Midi','ReloadFxType','bool')
     ReloadFxParams=ReadConfig('OSC2Midi','ReloadFxParams','bool')
     NoReload=ReadConfig('OSC2Midi','NoReload','bool')
@@ -342,7 +344,6 @@ if os.name != 'nt':
             dr,dw,de = select([sys.stdin], [], [], 0)
             return dr <> []
 
-
         atexit.register(set_normal_term)
         set_curses_term()
     except:
@@ -382,7 +383,7 @@ def Reload(client,force=False):
         print "NoReload!"
         return
 
-    
+
     # Here we are asking some values back from XR18 (an OSC message with an address without value send to XR18 triggers an OSC message back from XR18 with the actual value)
     # Let's start with the Type of effect loaded in the 4 slot available and the return levels.
     # NB: slot are 1,2,3,4.
@@ -447,7 +448,7 @@ def Reload(client,force=False):
                     print "OSCsend: /fx/%d/par/%02d" % (j,i)
                 client.send(OSC.OSCMessage("/fx/%d/par/%02d" % (j,i))) # FX parameters
                 time.sleep(WAITOSC)
-                
+
 def request_notifications(client):
     """
     Sends /xremote repeatedly to mixing desk to make sure changes are transmitted to our server; take care of user interaction; calls Reload.
@@ -457,7 +458,7 @@ def request_notifications(client):
     global DebugOSCrecv
     global DebugMIDIsend
     global DebugMIDIrecv
-    
+
     global NoReload
 
     while do_exit == False:
@@ -590,7 +591,7 @@ def Progress(incremento=127/15):
             sendToBCR(0,85,127)
         if Bank == 2:
             sendToBCR(0,85,FlipFlop*127)
- 
+
     elif MidiMode == 'MCU':
         #midi_out.send_message([0x90,95 ,Stat]) # Rec
         midi_out.send_message([0x90,MidiMessages["Rec"] ,Stat]) # Rec
@@ -601,7 +602,7 @@ def Progress(incremento=127/15):
         threading.Timer(1,Progress,()).start()
     FlipFlop=not FlipFlop
 
-    
+
 def parse_messages():
     """
     Starts the OSC msg_handler thread and initialize bidirectional connection with XR18 via OSC.
@@ -621,13 +622,13 @@ def parse_messages():
         global Mute
         global Solo
         global FxParVal
-        global FxReturn        
+        global FxReturn
         global BusName
 
         if time.time() - LastMidiEvent > WAITMIDI: # we are parsing OSC messages only if a consistent time is passed from the last Midi event
             if DebugOSCrecv > 0:
                 print 'OSCMessage("%s",%s,%s)' % (addr, tags, data)
-  
+
             if data[0] != data[0]: # take care of the "NaN" situation
                 data[0]=0
 
@@ -636,14 +637,14 @@ def parse_messages():
                 val=int(data[0]*127)
             if tags == 'i':
                 val=int(data[0])
-                
+
             # FX type (es.: "/fx/1/type")
             if re.match("/fx/./type",addr):
                 slot=int(addr[4]) # addr[4] is the FX (1 to 4)
                 FxType[slot-1]=data[0] 
                 if DebugOSCrecv > 0:
                     print "Found FX %d set to %d" % (slot,FxType[slot-1])
-                    
+
             # We need to know which channel is the Main Vocal, so we can map the Expression Pedal (on FCB1010)
             # to the right Send for Fx.
             elif re.match("/ch/../config/name",addr):
@@ -668,7 +669,7 @@ def parse_messages():
                     BusName[0]=name 
                     if ActiveBus == 0:
                         lcd_status()
-                    
+
             elif re.match("/ch/../mix/../level",addr): # Bus Sends
             # The busses 7-10 are the Fx Return Busses
                   val=int(data[0]*127)
@@ -688,7 +689,7 @@ def parse_messages():
                           elif MidiMode == 'MCU':
                               if ActiveBus == bus:
                                   sendToMCU(channel-8*Bank,val)
-                      
+
                       elif bus == 2:
                           if MidiMode == 'BCR':
                               sendToBCR(3,channel-8*Bank,val)
@@ -704,16 +705,15 @@ def parse_messages():
                                       sendToMCU(channel-8*Bank,val)
                       else:
                         pass # At the moment, the other busses are not mapped...
-                          
+
                   if DebugOSCrecv > 0:
                       print "Bus %d, Channel %d, Val=%d" % (bus,channel,val)
-                  
 
             # FX parameters (es.: "/fx/1/par/06")
             elif re.match("/fx/./par/..",addr): 
                 slot=int(addr[4])
                 par=int(addr[10:12])
-                
+
                 if tags == 'f':
                     val=int(data[0]*127)
                 if tags == 'i':
@@ -734,7 +734,7 @@ def parse_messages():
                                     sendToMCU(index,val)
                         except:
                             pass
-         
+
                 if DebugOSCrecv > 0:
                     print "FX: current=%d - slot=%d - par=%d - val=%f" %(CurrentFx,slot,par,data[0])
 
@@ -743,10 +743,10 @@ def parse_messages():
                 slot=int(addr[5])
                 val=int(data[0]*127)
                 FxReturn[0][slot-1]=val
-         
+
                 if DebugOSCrecv > 0:
                     print "FX return: current=%d - slot=%d - val=%f" %(CurrentFx,slot,val)
-                
+
                 if Bank == 2:
                     if MidiMode == 'BCR':
                         sendToBCR(0,slot,val)
@@ -759,10 +759,10 @@ def parse_messages():
                 slot=5
                 val=int(data[0]*127)
                 FxReturn[0][slot-1]=val
-         
+
                 if DebugOSCrecv > 0:
                     print "Aux return: current=%d - slot=%d - val=%f" %(CurrentFx,slot,val)
-                
+
                 if Bank == 2:
                     if MidiMode == 'BCR':
                         sendToBCR(0,slot,val)
@@ -886,7 +886,7 @@ def parse_messages():
                                    sendToBCR(0,72+channel-8*Bank,0) #MIDI ch. 1
                                elif MidiMode == 'MCU':
                                    RefreshController()
-            
+
             elif re.match("/-stat/solosw/..",addr):
                 channel=int(addr[14:16])
                 val=int(data[0])
@@ -900,13 +900,13 @@ def parse_messages():
                             sendToBCR(0,64+channel-8*Bank,val*127) #MIDI ch. 1, CC 65 - 73
                         elif MidiMode == 'MCU':
                             RefreshController()
-                
+
 
     # Setup OSC server & client
     server = OSC.OSCServer(("", PORT_SRV))
     server.addMsgHandler("default", msg_handler) # msg_handler() will receive ALL the OSC messages ("default" address)
     client = OSC.OSCClient(server=server) #This makes sure that client and server uses same socket. This has to be this way, as the X32 sends notifications back to same port as the /xremote message came from
-    
+
     client.connect((ADDR, PORT_SRV))
 
     # Start request notifications thread
@@ -1080,7 +1080,7 @@ def MidiCallback(message, time_stamp):
     global FxReturn
     global ActiveBus
     global do_exit
-    
+
     cc=0
     val=0
     address=""
@@ -1106,14 +1106,23 @@ def MidiCallback(message, time_stamp):
 ##                RefreshController()
 
             if message[1] == MidiMessages["Rec"] and message[2] == 0x7f:
-                do_exit=True
-                if os.name == 'posix' and os.uname()[1] == 'raspberrypi':
-#                                           1234567890123456
-                    lcd.lcd_display_string("Exiting...      ",1)
-                    lcd.lcd_display_string("Bye             ",2)
-                time.sleep(1)
-                os.system("killall Osc2MidiBridge.py")
-                exit()
+                if Shift == 0:
+                    do_exit=True
+                    if os.name == 'posix' and os.uname()[1] == 'raspberrypi':
+#                                               1234567890123456
+                        lcd.lcd_display_string("Exiting...      ",1)
+                        lcd.lcd_display_string("Bye             ",2)
+                    time.sleep(1)
+                    os.system("killall Osc2MidiBridge.py")
+                    exit()
+                else:
+                    if os.name == 'posix' and os.uname()[1] == 'raspberrypi':
+#                                               1234567890123456
+                        lcd.lcd_display_string("Halting...      ",1)
+                        lcd.lcd_display_string("Bye             ",2)
+                        time.sleep(1)
+                        os.system("sudo halt")
+                    exit()
 
             if message[1] == MidiMessages["Next"] and message[2] == 0x7f:
                 CurrentFx += 1
@@ -1138,7 +1147,6 @@ def MidiCallback(message, time_stamp):
                     oscsend("/fx/%d/par/%02d" % (CurrentFx,i)) # FX parameters request
                     time.sleep(WAITOSC)
 
-
             if message[1] == MidiMessages["Stop"] and message[2] == 0x7f:
                 if Shift == 1:
                     Shift=0
@@ -1148,11 +1156,6 @@ def MidiCallback(message, time_stamp):
                     midi_out.send_message([0x90,MidiMessages["Stop"],127])
                 lcd_status()
                 RefreshControllerfx()
-
-
-
-
-
 
             if message[1] == MidiMessages["TrackL"] and message[2] == 0x7f: # Track <<
                 ActiveBus-=1
@@ -1164,7 +1167,6 @@ def MidiCallback(message, time_stamp):
                 if ActiveBus > MAXBUS: ActiveBus = 0
                 lcd_status()
                 RefreshController()
-
 
             #if message[1] == 0x2e and message[2] == 0x7f: # Bank <<
             if message[1] == MidiMessages["BankL"] and message[2] == 0x7f: # Bank <<
@@ -1191,7 +1193,7 @@ def MidiCallback(message, time_stamp):
                     Solo[cc+8*Bank-1]=val
                     lcd_status()
                     RefreshController()
-                    
+
             #if message[1] >= 0x10 and message[1] <= 0x17 and message[2] == 0x7f: # Mute
             if message[1] >= MidiMessages["Mute"] and message[1] < MidiMessages["Mute"]+8 and message[2] == 0x7f: # Mute
                  #cc=message[1]-0x0f
@@ -1247,11 +1249,11 @@ def MidiCallback(message, time_stamp):
                     if cc < 5:
                         address="/rtn/%d/mix/01/level" % cc
                     if cc == 5:
-                        address="/rtn/aux/mix/01/level" 
+                        address="/rtn/aux/mix/01/level"
                     FxReturn[1][cc-1]=val
             if DebugMIDIsend > 0:
                 print "address=",address
-            
+
             RefreshController()
 ###### BCR2000 ######
 
@@ -1260,7 +1262,7 @@ def MidiCallback(message, time_stamp):
         MidiChannel=message[0]-0xAF # (0xB0 is Channel 1, 0xBF is Channel 16)
         cc=message[1]
         val=message[2]
-        
+
         if DebugMIDIrecv > 0:
             print "Ch.",MidiChannel," #",cc," =",val
         address=""
@@ -1343,9 +1345,9 @@ def MidiCallback(message, time_stamp):
                     if cc < 5:
                         address="/rtn/%d/mix/01/level" % cc
                     if cc == 5:
-                        address="/rtn/aux/mix/01/level" 
+                        address="/rtn/aux/mix/01/level"
                     FxReturn[1][cc-1]=val
-                    
+
 
 ####  MIDI Channel 3 ####
         if MidiChannel == 3: # Parametri FX corrente
@@ -1374,7 +1376,7 @@ def MidiCallback(message, time_stamp):
                     if cc < 5:
                         address="/rtn/%d/mix/01/level" % cc
                     if cc == 5:
-                        address="/rtn/aux/mix/01/level" 
+                        address="/rtn/aux/mix/01/level"
 
 
 ####  MIDI Channel 16 ####
@@ -1403,7 +1405,7 @@ def MidiCallback(message, time_stamp):
                 oscsend(address,float(val)/127)
         except:
             oscsend(address,int(val))
- 
+
 def ListMidiPort(midi_port ):
     """
     Helper function to open midi device
@@ -1413,7 +1415,7 @@ def ListMidiPort(midi_port ):
         print "    ",i,": ",port_name
         i=i+1
 
-       
+
 def OpenMidiPort(name,midi_port, descr="Devices"):
     """
     Helper function to open midi device
@@ -1429,7 +1431,7 @@ def OpenMidiPort(name,midi_port, descr="Devices"):
         else:
             print "    ",i,": ",port_name
         i=i+1
-        
+
     if port == -1:
         print "Device "+name+" not found in Midi %s. Aborting." % descr
         exit()
