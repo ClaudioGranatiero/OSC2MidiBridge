@@ -3,6 +3,7 @@
 
 """
 History:
+    2015-12-11: 0,0,16: argparse, various fixes
     2015-12-08: 0.0.15: fixes MCU
     2015-12-07: 0.0.14: MCU messages in dictionary; using "Track" buttons to change ActiveBus
     2015-12-06: 0.0.13: other MCU, fixes
@@ -19,8 +20,9 @@ History:
     2015-11-21: 0.0.2: refactoring, configuration file
     2015-11-20: 0.0.1: first working version; FX parameters
 """
-VERSION="0.0.15"
+VERSION="0.0.16"
 
+import argparse
 import rtmidi_python as rtmidi
 import time
 import re
@@ -78,12 +80,6 @@ Volume=[ # 16 channels
 Pan= [0]*32
 Mute= [0]*32
 Solo= [0]*32
-#FxParVal=[ # [type, value] for 32 parameters
-#            [['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],], # Fx1
-#            [['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],], # Fx2
-#            [['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],], # Fx3
-#            [['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],['i',0],], # Fx4
-#         ]
 FxParVal=[
             [['i',0]]*32
          ]*4
@@ -120,6 +116,8 @@ MidiMessages={"BankL":  0x2e,
 ### Some safe defaults (overloaded in config file)
 MIDINAME="BCR2000 port 1"
 MIDINAME2="None"
+MIDINAME_IN=""
+MIDINAME_OUT=""
 MidiMode='BCR'
 ADDR='192.168.0.12'
 PORT_SRV=10024
@@ -194,9 +192,21 @@ FxParam=[
             [1,2,3,4,5,6,7,8,9,10,11,12,13,14]  #44 Stereo / Dual Pitch
         ]
 
-if len(sys.argv) > 2:
-    if sys.argv[1] == '-f':
-         configfile=sys.argv[2] 
+
+
+# Argomenti della linea di comando gestiti da argparse
+parser = argparse.ArgumentParser(description="Osc2MidiBridge v. %s" % VERSION)
+# NB: gli argomenti che iniziano con "--" sono opzionali.
+parser.add_argument("-f", "--configfile", help="Config file (defaults to \"osc2midi.ini\")")
+parser.add_argument("-v", "--verbose", action="store_true", default=False, help="verbose")
+parser.add_argument("-I", "--midiin",  help="Midi-In device (override config file)")
+parser.add_argument("-O", "--midiout", help="Midi-Out device (override config file)")
+parser.add_argument("-A", "--address", help="OSC address (override config file)")
+args = parser.parse_args()
+
+if args.configfile != None and os.path.exists(args.configfile):
+    configfile=args.configfile
+
 
 def lcd_init():
     if os.name == 'posix' and os.uname()[1] == 'raspberrypi':
@@ -229,15 +239,16 @@ def ReadConfig(Section,Option,Type=None):
         print "ERROR:",err
         pass
 
-    out="ReadConfig: [%s] %s = " % (Section,Option)
-    print out,retval
+    if args.verbose == True:
+        out="ReadConfig: [%s] %s = " % (Section,Option)
+        print out,retval
     return retval
 
+if args.verbose == True:
+    print 
+    print "Osc2MidiBridge v."+VERSION
+    print "------------------------------"
 
-print 
-print "Osc2MidiBridge v."+VERSION
-print "------------------------------"
-#           1234567890123456
 if os.name == 'posix' and os.uname()[1] == 'raspberrypi':
     lcd=lcd_init()
     lcd.lcd_display_string("Osc2MidiBridge",1)
@@ -245,7 +256,7 @@ if os.name == 'posix' and os.uname()[1] == 'raspberrypi':
     time.sleep(1)
     lcd.lcd_clear()
 
-# The config file is searched firs#t in the home directory, then in the current working folder.
+# The config file is searched first in the home directory, then in the current working folder.
 parser = ConfigParser.SafeConfigParser()
 home = os.path.expanduser("~")
 if configfile == '':
@@ -254,10 +265,13 @@ if configfile == '':
     else:
         configfile=CONFIGFILE
 
-print "ConfigFile: ",configfile
+if args.verbose == True:
+    print "ConfigFile: ",configfile
 
 if parser.read(configfile) != None:
     MIDINAME=ReadConfig('MIDI', 'DeviceName')
+    MIDINAME_IN=ReadConfig('MIDI', 'DeviceNameIn')
+    MIDINAME_OUT=ReadConfig('MIDI', 'DeviceNameOut')
     MIDINAME2=ReadConfig('MIDI', 'DeviceName2')
     ADDR=ReadConfig('OSC', 'Address')
     PORT_SRV=ReadConfig('OSC', 'ServerPort','int')
@@ -311,6 +325,13 @@ Esempio di "osc2midi.ini":
             ]
 
 """
+# Override config settings from commandline
+
+
+if args.address != None:
+    ADDR=args.address
+
+
 if os.name != 'nt':
 # save the terminal settings
     try:
@@ -1422,26 +1443,41 @@ def OpenMidiPort(name,midi_port, descr="Devices"):
     """
     i=0
     port=-1
-    print "MIDI %s:" % descr
+    if args.verbose == True:
+        print "MIDI %s:" % descr
     for port_name in midi_port.ports:
         if port_name.find(name) != -1:
             port=i
-            print "    ",i,": * ",port_name," *"
+            if args.verbose == True:
+                print "    ",i,": * ",port_name," *"
             break
         else:
-            print "    ",i,": ",port_name
+            if args.verbose == True:
+                print "    ",i,": ",port_name
         i=i+1
 
     if port == -1:
-        print "Device "+name+" not found in Midi %s. Aborting." % descr
+        if args.verbose == True:
+            print "Device "+name+" not found in Midi %s. Aborting." % descr
         exit()
     return(port)
 
+if args.midiin != None:
+    MIDINAME_IN=args.midiin
+
+if args.midiout != None:
+    MIDINAME_OUT=args.midiout
+
+if MIDINAME_IN == "":
+    MIDINAME_IN=MIDINAME
+
+if MIDINAME_OUT == "":
+    MIDINAME_OUT=MIDINAME
 
 midi_in=rtmidi.MidiIn()
-port_in=OpenMidiPort(MIDINAME,midi_in,"Input Devices")
+port_in=OpenMidiPort(MIDINAME_IN,midi_in,"Input Devices")
 midi_out=rtmidi.MidiOut()
-port_out=OpenMidiPort(MIDINAME,midi_out,"Output Devices")
+port_out=OpenMidiPort(MIDINAME_OUT,midi_out,"Output Devices")
 
 midi_in.callback = MidiCallback
 
@@ -1458,8 +1494,9 @@ if MIDINAME2 != "None":
     midi_in2.callback = MidiCallback 
 
 
-print "====================================="
-help()
+if args.verbose == True:
+    print "====================================="
+    help()
 
 ### Some MIDI initial setup ###
 # CurrentFx buttons:
