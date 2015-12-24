@@ -3,7 +3,8 @@
 
 """
 History:
-    2015-12-11: 0,0,16: argparse, various fixes
+    2015-12-21: 0.0.17: code cleanup; support for CGfootsy on Midi# 15
+    2015-12-11: 0.0.16: argparse, various fixes
     2015-12-08: 0.0.15: fixes MCU
     2015-12-07: 0.0.14: MCU messages in dictionary; using "Track" buttons to change ActiveBus
     2015-12-06: 0.0.13: other MCU, fixes
@@ -20,7 +21,7 @@ History:
     2015-11-21: 0.0.2: refactoring, configuration file
     2015-11-20: 0.0.1: first working version; FX parameters
 """
-VERSION="0.0.16"
+VERSION="0.0.17"
 
 import argparse
 import rtmidi_python as rtmidi
@@ -41,6 +42,148 @@ import string
 if os.name == 'posix' and os.uname()[1] == 'raspberrypi':
     import RPi_I2C_driver
 
+def ListMidiPort(midi_port ):
+    """
+    Helper function to open midi device
+    """
+    i=0
+    for port_name in midi_port.ports:
+        print "    ",i,": ",port_name
+        i=i+1
+
+
+def OpenMidiPort(name,midi_port, descr="Devices"):
+    """
+    Helper function to open midi device
+    """
+    i=0
+    port=-1
+    if args.verbose == True:
+        print "MIDI %s:" % descr
+    for port_name in midi_port.ports:
+        if port_name.find(name) != -1:
+            port=i
+            if args.verbose == True:
+                print "    ",i,": * ",port_name," *"
+            break
+        else:
+            if args.verbose == True:
+                print "    ",i,": ",port_name
+        i=i+1
+
+    if port == -1:
+        if args.verbose == True:
+            print "Device "+name+" not found in Midi %s. Aborting." % descr
+        exit()
+    return(port)
+
+def lcd_init():
+    if os.name == 'posix' and os.uname()[1] == 'raspberrypi':
+        mylcd = RPi_I2C_driver.lcd()
+    return(mylcd)
+
+def ReadConfig(Section,Option,Type=None):
+    retval=""
+    try:
+        if Type == 'int':
+            retval=parser.getint(Section,Option)
+        elif Type == 'float':
+            retval=parser.getfloat(Section,Option)
+        elif Type == 'bool':
+            retval=parser.getboolean(Section,Option)
+        else:
+            retval=parser.get(Section,Option)
+    except ConfigParser.NoSectionError,err:
+        print "Exception raised when a specified section is not found."
+        print "ERROR:",err
+        pass
+
+    except ConfigParser.DuplicateSectionError,err:
+        print "Exception raised if add_section() is called with the name of a section that is already present."
+        print "ERROR:",err
+        pass
+
+    except ConfigParser.NoOptionError,err:
+        print "Exception raised when a specified option is not found in the specified section."
+        print "ERROR:",err
+        pass
+
+    if args.verbose == True:
+        out="ReadConfig: [%s] %s = " % (Section,Option)
+        print out,retval
+    return retval
+
+if os.name != 'nt':
+# save the terminal settings
+    try:
+        fd = sys.stdin.fileno()
+        new_term = termios.tcgetattr(fd)
+        old_term = termios.tcgetattr(fd)
+
+# new terminal setting unbuffered
+        new_term[3] = (new_term[3] & ~termios.ICANON & ~termios.ECHO)
+
+# switch to normal terminal
+        def set_normal_term():
+            termios.tcsetattr(fd, termios.TCSAFLUSH, old_term)
+
+# switch to unbuffered terminal
+        def set_curses_term():
+            termios.tcsetattr(fd, termios.TCSAFLUSH, new_term)
+
+        def putch(ch):
+            sys.stdout.write(ch)
+
+        def getch():
+            return sys.stdin.read(1)
+
+        def getche():
+            ch = getch()
+            putch(ch)
+            return ch
+
+        def kbhit():
+            dr,dw,de = select([sys.stdin], [], [], 0)
+            return dr <> []
+
+        atexit.register(set_normal_term)
+        set_curses_term()
+    except:
+        pass
+
+def val2key(dic,val):
+    """
+    takes a dictionary and returns the key with the value specified as input
+    """
+    return dic.keys()[dic.values().index(val)]
+
+def sendToMCU(fader,val):
+    midi_out.send_message([0x90,MidiMessages["Unlock"]+fader,127]) # unlock fader
+    midi_out.send_message([MidiMessages["Fader"]+fader-1 ,val,val]) # move fader
+    midi_out.send_message([0x90,MidiMessages["Unlock"]+fader ,0])  # lock fader
+
+def sendToBCR(channel,slot,val):
+    if MidiMode == 'BCR':
+        if channel >= 0 and channel <=3:
+            cmd=0xB0+channel
+        midi_out.send_message([cmd,slot,val])
+
+
+def interpolate(value, inMin, inMax, outMin, outMax):
+    """
+    map the value, originally in range (inMin, inMax), to proportional value in range (outMin,outMax)
+    """
+    # Figure out how 'wide' each range is
+    inSpan = inMax - inMin
+    outSpan = outMax - outMin
+
+    # Convert the in range into a 0-1 range (float)
+    valueScaled = float(value - inMin) / float(inSpan)
+
+    # Convert the 0-1 range into a value in the out range.
+    return outMin + (valueScaled * outSpan)
+
+
 ### Some global variables ###
 CONFIGFILE='osc2midi.ini'
 configfile=''
@@ -59,6 +202,7 @@ Shift=0
 Stat=0
 FlipFlop=0
 VoiceChannel=0
+BassChannel=0
 do_exit=False
 BusName=["Master","Bus1","Bus2","Bus3","Bus4","Bus5","Bus6"]
 FxType=[0,0,0,0]
@@ -136,62 +280,7 @@ ReloadBus1Levels=True
 ReloadBus2Levels=True
 ReloadFxType=True
 ReloadFxParams=True
-
-# This list contains the OSC parameters to map to midi for every type of fx
-# The index in the inner list is the midi controller, the number at that index is the OSC parameter.
-# i.e.: effect type 11 (3-Tap delay) is:
-#     [1,4,5,6,7,9,2]
-# that means: controller 0 (in my BCR2000 is CC2 on midi channel 3, because CC1 is faulty)
-#   is OSC parameter 1. Controller 1 (CC3) is OSC parameter 4, and so on.
-# NB: all values are considered as float! This is not the real situation, some parameters have integer values!! TO BE FIXED!!!
-FxParam=[
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #00 Hall Reverb - 1: PreDelay, 2:Decay, 3:Size, 4: Damping, 5: Diffuse, 6: Level, 7: LoCut, 8: HiCut, 9: BassMulti, 10: Spread, 11: Shape, 12: ModSpeed
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #01 Ambience Reverb - 1: PreDelay, 2:Decay, 3:Size, 4: Damping, 5: Diffuse, 6: Level, 7: LoCut, 8: HiCut, 9: Modulate, 10: TailGain
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #02 Rich Plate Reverb - 1: PreDelay, 2:Decay, 3:Size, 4: Damping, 5: Diffuse, 6: Level, 7: LoCut, 8: HiCut, 9: BassMulti, 10: Spread, 11: Attack, 12: Spin, 13: EchoL, 14: EchoR, 15: EchoFeedL, 16: EchoFeedR
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #03 Room Reverb - 1: PreDelay, 2:Decay, 3:Size, 4: Damping, 5: Diffuse, 6: Level, 7: LoCut, 8: HiCut, 9: BassMulti, 10: Spread, 11: Attack, 12: Spin, 13: EchoL, 14: EchoR, 15: EchoFeedL, 16: EchoFeedR
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #04 Chamber Reverb - 1: PreDelay, 2:Decay, 3:Size, 4: Damping, 5: Diffuse, 6: Level, 7: LoCut, 8: HiCut, 9: BassMulti, 10: Spread, 11: Attack, 12: Spin, 13: ReflectionL, 14: ReflectionR, 15: ReflectionGainL, 16: ReflectionGainR
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #05 Plate Reverb - 1: PreDelay, 2:Decay, 3:Size, 4: Damping, 5: Diffuse, 6: Level, 7: LoCut, 8: HiCut, 9: BassMulti, 10: XOver, 11: Mod, 12: ModSpeed
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #06 Vintage Reverb
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #07 Vintage Room
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #08 Gated Reverb
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #09 Reverse Reverb
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #10 Stereo Delay
-            [1,4,5,6,7,9,2,8,9,10,11,12,13,14], #11 3-Tap Delay - 1: Time, 2: ?, 3: ?, 4: Feed, 5: LoCut, 6: HiCut, 7: FactorA, 8: GainA, 9: PanA, 10: FactorB, 11: GainB, 12: PanB
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #12 Rhythm Delay
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #13 Stereo Chorus
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #14 Stereo Flanger
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #15 Stereo Phaser
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #16 Dimensional Chorus
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #17 Mood Filter
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #18 Rotary Speaker
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #19 Stereo Tremolo
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #20 Sub Octaver
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #21 Delay + Chamber
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #22 Chorus + Chamber
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #23 Flanger + Chamber
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #24 Delay + Chorus
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #25 Delay + Flanger
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #26 Modulation Delay
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #27 Graphic and Tru EQ
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #28 DeEsser
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #29 Xtec EQ1
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #30 Xtec EQ5
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #31 Wave Designer
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #32 Precision Limiter
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #33 Combinator
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #34 Fair Compressor
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #35 Leisure Compressor
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #36 Ultimo Compressor
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #37 Enhancer
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #38 Exciter
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #39 Stereo Imager
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #40 Edison EX1
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #41 Sound Maxer
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #42 Guitar Amp
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14], #43 Tube Stage
-            [1,2,3,4,5,6,7,8,9,10,11,12,13,14]  #44 Stereo / Dual Pitch
-        ]
-
+Translation = None
 
 
 # Argomenti della linea di comando gestiti da argparse
@@ -202,48 +291,21 @@ parser.add_argument("-v", "--verbose", action="store_true", default=False, help=
 parser.add_argument("-I", "--midiin",  help="Midi-In device (override config file)")
 parser.add_argument("-O", "--midiout", help="Midi-Out device (override config file)")
 parser.add_argument("-A", "--address", help="OSC address (override config file)")
+parser.add_argument("-L", "--listmidi",help="list midi devices and exits", action="store_true",default=False)
 args = parser.parse_args()
 
 if args.configfile != None and os.path.exists(args.configfile):
     configfile=args.configfile
 
+if args.listmidi:
+    print "Midi IN:"
+    midi_in=rtmidi.MidiIn()
+    ListMidiPort(midi_in)
 
-def lcd_init():
-    if os.name == 'posix' and os.uname()[1] == 'raspberrypi':
-        mylcd = RPi_I2C_driver.lcd()
-    return(mylcd)
-
-def ReadConfig(Section,Option,Type=None):
-    retval=""
-    try:
-        if Type == 'int':
-            retval=parser.getint(Section,Option)
-        elif Type == 'float':
-            retval=parser.getfloat(Section,Option)
-        elif Type == 'bool':
-            retval=parser.getboolean(Section,Option)
-        else:
-            retval=parser.get(Section,Option)
-    except ConfigParser.NoSectionError,err:
-        print "Exception raised when a specified section is not found."
-        print "ERROR:",err
-        pass
-
-    except ConfigParser.DuplicateSectionError,err:
-        print "Exception raised if add_section() is called with the name of a section that is already present."
-        print "ERROR:",err
-        pass
-
-    except ConfigParser.NoOptionError,err:
-        print "Exception raised when a specified option is not found in the specified section."
-        print "ERROR:",err
-        pass
-
-    if args.verbose == True:
-        out="ReadConfig: [%s] %s = " % (Section,Option)
-        print out,retval
-    return retval
-
+    print "Midi OUT:"
+    midi_out=rtmidi.MidiOut()
+    ListMidiPort(midi_out)
+    exit()
 if args.verbose == True:
     print 
     print "Osc2MidiBridge v."+VERSION
@@ -281,120 +343,20 @@ if parser.read(configfile) != None:
     WAITRELOAD=ReadConfig('OSC2Midi', 'WaitReload','float')
     CurrentFx=ReadConfig('OSC2Midi','CurrentFx','int')
     FxParam=ast.literal_eval(ReadConfig('OSC2Midi', "FxParam"))
-    ReloadMasterLevels=ReadConfig('OSC2Midi','ReloadMasterLevels','bool')
-    ReloadMasterMute=ReadConfig('OSC2Midi','ReloadMasterMute','bool')
-    ReloadMasterPan=ReadConfig('OSC2Midi','ReloadMasterPan','bool')
-    ReloadMasterSolo=ReadConfig('OSC2Midi','ReloadMasterSolo','bool')
-    ReloadBus1Levels=ReadConfig('OSC2Midi','ReloadBus1Levels','bool')
-    ReloadBus2Levels=ReadConfig('OSC2Midi','ReloadBus2Levels','bool')
-    ReloadFxType=ReadConfig('OSC2Midi','ReloadFxType','bool')
-    ReloadFxParams=ReadConfig('OSC2Midi','ReloadFxParams','bool')
     NoReload=ReadConfig('OSC2Midi','NoReload','bool')
     MidiMode=ReadConfig('MIDI','Mode')
+    Translation=ast.literal_eval(ReadConfig('OSC2Midi','Translation'))
+    FxInterpolation=ast.literal_eval(ReadConfig('OSC2Midi','FxInterpolation'))
 else:
     print "Config file not found..."
     
-"""
-Esempio di "osc2midi.ini":
-    [MIDI]
-    DeviceName = BCR 2000 port 1
-    Wait = 0.02
 
-    [OSC]
-    Address = 192.168.0.12
-    Port = 10024
-    Wait = 0.02
-
-    [OSC2Midi]
-    WaitReload = 2
-    FxParam = [
-            [1,2,3,4,5,6,7], #00 Hall Reverb
-            [1,2,3,4,5,6,7], #01 Ambience Reverb
-            [1,2,3,4,5,6,7], #02 Rich Plate Reverb
-            [1,2,3,4,5,6,7], #03 Room Reverb
-            [1,2,3,4,5,6,7], #04 Chamber Reverb
-            [1,2,3,4,5,6,7], #05 Plate Reverb
-            [1,2,3,4,5,6,7], #06 Vintage Reverb
-            [1,2,3,4,5,6,7], #07 Vintage Room
-            [1,2,3,4,5,6,7], #08 Gated Reverb
-            [1,2,3,4,5,6,7], #09 Reverse Reverb
-            [1,2,3,4,5,6,7], #10 Stereo Delay
-            [1,4,5,6,7,9,2], #11 3-Tap Delay - 1: Time, 2: ?, 3: ?, 4: Feed, 5: LoCut, 6: HiCut, 7: FactorA, 8: GainA, 9: PanA, 10: FactorB, 11: GainB, 12: PanB
-            [1,2,3,4,5,6,7], #12 Rhythm Delay
-            ....
-            ]
-
-"""
 # Override config settings from commandline
 
 
 if args.address != None:
     ADDR=args.address
 
-
-if os.name != 'nt':
-# save the terminal settings
-    try:
-        fd = sys.stdin.fileno()
-        new_term = termios.tcgetattr(fd)
-        old_term = termios.tcgetattr(fd)
-
-# new terminal setting unbuffered
-        new_term[3] = (new_term[3] & ~termios.ICANON & ~termios.ECHO)
-
-# switch to normal terminal
-        def set_normal_term():
-            termios.tcsetattr(fd, termios.TCSAFLUSH, old_term)
-
-# switch to unbuffered terminal
-        def set_curses_term():
-            termios.tcsetattr(fd, termios.TCSAFLUSH, new_term)
-
-        def putch(ch):
-            sys.stdout.write(ch)
-
-        def getch():
-            return sys.stdin.read(1)
-
-        def getche():
-            ch = getch()
-            putch(ch)
-            return ch
-
-        def kbhit():
-            dr,dw,de = select([sys.stdin], [], [], 0)
-            return dr <> []
-
-        atexit.register(set_normal_term)
-        set_curses_term()
-    except:
-        pass
-
-def sendToMCU(fader,val):
-    midi_out.send_message([0x90,MidiMessages["Unlock"]+fader,127]) # unlock fader
-    midi_out.send_message([MidiMessages["Fader"]+fader-1 ,val,val]) # move fader
-    midi_out.send_message([0x90,MidiMessages["Unlock"]+fader ,0])  # lock fader
-
-def sendToBCR(channel,slot,val):
-    if MidiMode == 'BCR':
-        if channel >= 0 and channel <=3:
-            cmd=0xB0+channel
-        midi_out.send_message([cmd,slot,val])
-
-
-def interpolate(value, inMin, inMax, outMin, outMax):
-    """
-    map the value, originally in range (inMin, inMax), to proportional value in range (outMin,outMax)
-    """
-    # Figure out how 'wide' each range is
-    inSpan = inMax - inMin
-    outSpan = outMax - outMin
-
-    # Convert the in range into a 0-1 range (float)
-    valueScaled = float(value - inMin) / float(inSpan)
-
-    # Convert the 0-1 range into a value in the out range.
-    return outMin + (valueScaled * outSpan)
 
 def Reload(client,force=False):
     """
@@ -408,67 +370,59 @@ def Reload(client,force=False):
     # Here we are asking some values back from XR18 (an OSC message with an address without value send to XR18 triggers an OSC message back from XR18 with the actual value)
     # Let's start with the Type of effect loaded in the 4 slot available and the return levels.
     # NB: slot are 1,2,3,4.
-    if ReloadFxType:
-        for i in range(1,5):
-            if DebugOSCsend > 0:
-                print "OSCsend: /fx/%d/type" % i
-            client.send(OSC.OSCMessage("/fx/%d/type" % i)) # FX type
-            client.send(OSC.OSCMessage("/rtn/%d/mix/fader" % i)) # FX return level (Master)
-            time.sleep(WAITOSC)
-            client.send(OSC.OSCMessage("/rtn/%d/mix/01/level" % i)) # FX return level (Bus1)
-            time.sleep(WAITOSC)
-            client.send(OSC.OSCMessage("/rtn/%d/mix/02/level" % i)) # FX return level (Bus2)
-            time.sleep(WAITOSC)
     client.send(OSC.OSCMessage("/lr/config/name")) # Name of the master bus
     time.sleep(WAITOSC)
     for i in range(1,7):
             client.send(OSC.OSCMessage("/bus/%d/config/name" % i)) # Name of the bus
             time.sleep(WAITOSC)
+    for i in range(1,5):
+        if DebugOSCsend > 0:
+            print "OSCsend: /fx/%d/type" % i
+        client.send(OSC.OSCMessage("/fx/%d/type" % i)) # FX type
+        client.send(OSC.OSCMessage("/rtn/%d/mix/fader" % i)) # FX return level (Master)
+        time.sleep(WAITOSC)
+        client.send(OSC.OSCMessage("/rtn/%d/mix/01/level" % i)) # FX return level (Bus1)
+        time.sleep(WAITOSC)
+        client.send(OSC.OSCMessage("/rtn/%d/mix/02/level" % i)) # FX return level (Bus2)
+        time.sleep(WAITOSC)
     for i in range(1,17): 
         # Volume Master
-        if ReloadMasterLevels:
-            client.send(OSC.OSCMessage("/ch/%02d/mix/fader" % i)) # Master LR
+        client.send(OSC.OSCMessage("/ch/%02d/mix/fader" % i)) # Master LR
+        time.sleep(WAITOSC)
+        client.send(OSC.OSCMessage("/ch/%02d/config/name" % i)) # Name of the channel 
+        time.sleep(WAITOSC)
+        for j in range(7,11): # 7-10 are the FX busses
+            client.send(OSC.OSCMessage("/ch/%02d/mix/%02d/level" % (i,j))) # FX sends
             time.sleep(WAITOSC)
-            client.send(OSC.OSCMessage("/ch/%02d/config/name" % i)) # Name of the channel 
-            time.sleep(WAITOSC)
-            for j in range(7,11): # 7-10 are the FX busses
-                client.send(OSC.OSCMessage("/ch/%02d/mix/%02d/level" % (i,j))) # FX sends
-                time.sleep(WAITOSC)
-
 
         # Mute
-        if ReloadMasterMute:
-            client.send(OSC.OSCMessage("/ch/%02d/mix/on" % i)) # Mute
-            time.sleep(WAITOSC)
+        client.send(OSC.OSCMessage("/ch/%02d/mix/on" % i)) # Mute
+        time.sleep(WAITOSC)
 
         # Pan
-        if ReloadMasterPan:
-            client.send(OSC.OSCMessage("/ch/%02d/mix/pan" % i)) # Pan
-            time.sleep(WAITOSC)
+        client.send(OSC.OSCMessage("/ch/%02d/mix/pan" % i)) # Pan
+        time.sleep(WAITOSC)
 
         #Solo
-        if ReloadMasterSolo:
-            client.send(OSC.OSCMessage("/-stat/solosw/%02d" % i)) # Solo
-            time.sleep(WAITOSC)
+        client.send(OSC.OSCMessage("/-stat/solosw/%02d" % i)) # Solo
+        time.sleep(WAITOSC)
 
         # Send levels for Bus1
-        if ReloadBus1Levels:
-            client.send(OSC.OSCMessage("/ch/%02d/mix/01/level" % i)) # Phones 1 (Bus1)
-            time.sleep(WAITOSC)
+        client.send(OSC.OSCMessage("/ch/%02d/mix/01/level" % i)) # Phones 1 (Bus1)
+        time.sleep(WAITOSC)
 
         # Send levels for Bus2
-        if ReloadBus2Levels:
-            client.send(OSC.OSCMessage("/ch/%02d/mix/02/level" % i)) # Phones 2 (Bus2)
-            time.sleep(WAITOSC)
+        client.send(OSC.OSCMessage("/ch/%02d/mix/02/level" % i)) # Phones 2 (Bus2)
+        time.sleep(WAITOSC)
+
     # FX parameters for the currently selected slot.
     # CurrentFX is the currently selected slot (we can select 1 of 4 different slots with the 4 "User defined" buttons on BCR2000)
-    if ReloadFxParams:
-        for j in range(1,5):
-            for i in FxParam[FxType[j-1]]:
-                if DebugOSCsend > 0:
-                    print "OSCsend: /fx/%d/par/%02d" % (j,i)
-                client.send(OSC.OSCMessage("/fx/%d/par/%02d" % (j,i))) # FX parameters
-                time.sleep(WAITOSC)
+    for j in range(1,5):
+        for i in FxParam[FxType[j-1]]:
+            if DebugOSCsend > 0:
+                print "OSCsend: /fx/%d/par/%02d" % (j,i)
+            client.send(OSC.OSCMessage("/fx/%d/par/%02d" % (j,i))) # FX parameters
+            time.sleep(WAITOSC)
 
 def request_notifications(client):
     """
@@ -492,7 +446,7 @@ def request_notifications(client):
 
         try:
             ch=''
-            if os.name == 'nt': # At the moment this works only in Windows... That's all I need.
+            if os.name == 'nt':
                 if msvcrt.kbhit():
                     ch=msvcrt.getch() 
             else:
@@ -554,15 +508,13 @@ def lcd_status(MidiChannel=0, cc=0, val=0):
             BUS="Bus%d: %s" %(Bus, BusName[Bus])
     if os.name == 'posix' and os.uname()[1] == 'raspberrypi':
         lcd=lcd_init()
-       #lcd.lcd_clear()
         if Shift == 1:
             lcd.lcd_display_string("Bank=%d Fx=%d Shft"%(Bank,CurrentFx),1)
         else:
             lcd.lcd_display_string("Bank=%d Fx=%d"%(Bank,CurrentFx),1)
         lcd.lcd_display_string(" "*16,2)
         lcd.lcd_display_string("%s"%(BUS),2)
-    #if MidiChannel < 16 and MidiChannel > 0 and cc < 0x100 and cc >= 0 and val < 0x100 and val >= 0 and time.time() - LastMidiEvent > 1: 
-    #    lcd.lcd_display_string("Ch%x CC%02x v:%02x"%(MidiChannel,cc,val),2)
+
 def help():
     print "h - this help page"
     print "Q - prepare to quit (close sockets and threads)"
@@ -589,7 +541,6 @@ def status():
     print "Bank=%d" % Bank
     print "ActiveBus=%d" % AciveBus
     print "-------------------------------"
-    # TO BE CONTINUED...
 
 def Progress(incremento=127/15):
     """
@@ -614,7 +565,6 @@ def Progress(incremento=127/15):
             sendToBCR(0,85,FlipFlop*127)
 
     elif MidiMode == 'MCU':
-        #midi_out.send_message([0x90,95 ,Stat]) # Rec
         midi_out.send_message([0x90,MidiMessages["Rec"] ,Stat]) # Rec
         if Stat == 0: Stat=127
         else:  Stat=0
@@ -634,6 +584,7 @@ def parse_messages():
         Parses the received OSC messages, sends corresponding values to Midi. Ignore non pertinent messages.
         """
         global VoiceChannel
+        global BassChannel
         global LastMidiEvent
         global FxType
         global CurrentFx
@@ -675,6 +626,9 @@ def parse_messages():
                 if name.lower() in ("voce","voce1","vox","vox1","voice","voice1"):
                     VoiceChannel=channel
                     if DebugOSCrecv > 0: print "VoiceChannel=%d" % channel
+                if name.lower() in ("basso","bass"):
+                    BassChannel=channel
+                    if DebugOSCrecv > 0: print "BassChannel=%d" % channel
             elif re.match("/bus/./config/name",addr):
                 channel=int(addr[5])
                 name=data[0]
@@ -1415,6 +1369,36 @@ def MidiCallback(message, time_stamp):
                     print "Exp B"
                 address="/fx/2/par/01" # FX2 time
 
+####   MIDI Channel 15 (CG footsy)  ####
+            """
+            FxInterpolation=[
+                            [ # Voice Channel
+                                [0.0,1.0], # Fx1
+                                [0.0,1.0], # Fx2
+                                [0.0,1.0], # Fx3
+                                [0.0,1.0]  # Fx4
+                            ],
+                            [ # Bass Channel
+                                [0.0,1.0], # Fx1
+                                [0.0,1.0], # Fx2
+                                [0.0,1.0], # Fx3
+                                [0.0,1.0]  # Fx4
+                            ]
+                        ]
+            """
+        if MidiChannel == 15: # CGfootsy
+            if DebugMIDIrecv > 0:
+                print "CGfootsy!"
+            if cc >= 1 and cc <= 4: #fila inferiore (Voice)
+                address="/ch/%02d/mix/%02d/level" % (VoiceChannel,cc+6) # Send of Voice on Fx1-4
+                interpolation=(FxInterpolation[0][cc-1][0],FxInterpolation[0][cc-1][1])
+
+            if cc >= 6 and cc <=9: # fila superiore (Bass)
+                address="/ch/%02d/mix/%02d/level" % (BassChannel,cc+1) # Send of Voice on Fx1-4
+                interpolation=(FxInterpolation[1][cc-5][0],FxInterpolation[1][cc-5][1])
+#
+
+
 # End of MidiCallback
 
 # Ok, if we have an address, we can send an OSC message:
@@ -1426,41 +1410,6 @@ def MidiCallback(message, time_stamp):
                 oscsend(address,float(val)/127)
         except:
             oscsend(address,int(val))
-
-def ListMidiPort(midi_port ):
-    """
-    Helper function to open midi device
-    """
-    i=0
-    for port_name in midi_port.ports:
-        print "    ",i,": ",port_name
-        i=i+1
-
-
-def OpenMidiPort(name,midi_port, descr="Devices"):
-    """
-    Helper function to open midi device
-    """
-    i=0
-    port=-1
-    if args.verbose == True:
-        print "MIDI %s:" % descr
-    for port_name in midi_port.ports:
-        if port_name.find(name) != -1:
-            port=i
-            if args.verbose == True:
-                print "    ",i,": * ",port_name," *"
-            break
-        else:
-            if args.verbose == True:
-                print "    ",i,": ",port_name
-        i=i+1
-
-    if port == -1:
-        if args.verbose == True:
-            print "Device "+name+" not found in Midi %s. Aborting." % descr
-        exit()
-    return(port)
 
 if args.midiin != None:
     MIDINAME_IN=args.midiin
