@@ -3,6 +3,7 @@
 
 """
 History:
+    2015-12-25: 0.0.18: Footsy support (configure parameters, persistence)
     2015-12-21: 0.0.17: code cleanup; support for CGfootsy on Midi# 15
     2015-12-11: 0.0.16: argparse, various fixes
     2015-12-08: 0.0.15: fixes MCU
@@ -21,7 +22,7 @@ History:
     2015-11-21: 0.0.2: refactoring, configuration file
     2015-11-20: 0.0.1: first working version; FX parameters
 """
-VERSION="0.0.17"
+VERSION="0.0.18"
 
 import argparse
 import rtmidi_python as rtmidi
@@ -71,10 +72,10 @@ def OpenMidiPort(name,midi_port, descr="Devices"):
                 print "    ",i,": ",port_name
         i=i+1
 
-    if port == -1:
-        if args.verbose == True:
-            print "Device "+name+" not found in Midi %s. Aborting." % descr
-        exit()
+#    if port == -1:
+#        if args.verbose == True:
+#            print "Device "+name+" not found in Midi %s. Aborting." % descr
+#        exit()
     return(port)
 
 def lcd_init():
@@ -158,15 +159,16 @@ def val2key(dic,val):
     return dic.keys()[dic.values().index(val)]
 
 def sendToMCU(fader,val):
-    midi_out.send_message([0x90,MidiMessages["Unlock"]+fader,127]) # unlock fader
-    midi_out.send_message([MidiMessages["Fader"]+fader-1 ,val,val]) # move fader
-    midi_out.send_message([0x90,MidiMessages["Unlock"]+fader ,0])  # lock fader
+    if port_out >= 0:
+        midi_out.send_message([0x90,MidiMessages["Unlock"]+fader,127]) # unlock fader
+        midi_out.send_message([MidiMessages["Fader"]+fader-1 ,val,val]) # move fader
+        midi_out.send_message([0x90,MidiMessages["Unlock"]+fader ,0])  # lock fader
 
 def sendToBCR(channel,slot,val):
     if MidiMode == 'BCR':
         if channel >= 0 and channel <=3:
             cmd=0xB0+channel
-        midi_out.send_message([cmd,slot,val])
+        if port_out >= 0: midi_out.send_message([cmd,slot,val])
 
 
 def interpolate(value, inMin, inMax, outMin, outMax):
@@ -205,6 +207,8 @@ VoiceChannel=0
 BassChannel=0
 do_exit=False
 BusName=["Master","Bus1","Bus2","Bus3","Bus4","Bus5","Bus6"]
+FootsyStatus=[[127]*4,[127]*4]
+FootsyTimer=0
 FxType=[0,0,0,0]
 FxReturn=[ #Fx1, Fx2, Fx3, Fx4, Aux
             [0]*5, # Master
@@ -259,7 +263,6 @@ MidiMessages={"BankL":  0x2e,
 
 ### Some safe defaults (overloaded in config file)
 MIDINAME="BCR2000 port 1"
-MIDINAME2="None"
 MIDINAME_IN=""
 MIDINAME_OUT=""
 MidiMode='BCR'
@@ -288,8 +291,8 @@ parser = argparse.ArgumentParser(description="Osc2MidiBridge v. %s" % VERSION)
 # NB: gli argomenti che iniziano con "--" sono opzionali.
 parser.add_argument("-f", "--configfile", help="Config file (defaults to \"osc2midi.ini\")")
 parser.add_argument("-v", "--verbose", action="store_true", default=False, help="verbose")
-parser.add_argument("-I", "--midiin",  help="Midi-In device (override config file)")
-parser.add_argument("-O", "--midiout", help="Midi-Out device (override config file)")
+parser.add_argument("-I", "--midiin",  help="Midi-In device(s) (override config file)")
+parser.add_argument("-O", "--midiout", help="Midi-Out device(s) (override config file)")
 parser.add_argument("-A", "--address", help="OSC address (override config file)")
 parser.add_argument("-L", "--listmidi",help="list midi devices and exits", action="store_true",default=False)
 args = parser.parse_args()
@@ -320,21 +323,24 @@ if os.name == 'posix' and os.uname()[1] == 'raspberrypi':
 
 # The config file is searched first in the home directory, then in the current working folder.
 parser = ConfigParser.SafeConfigParser()
+
+
 home = os.path.expanduser("~")
 if configfile == '':
-    if os.path.isfile(home+CONFIGFILE):
+    if os.path.isfile(home+CONFIGFILE): # home dir
         configfile=home+CONFIGFILE
-    else:
+    elif os.path.isfile(CONFIGFILE): # working dir
         configfile=CONFIGFILE
+    elif os.path.isfile(os.path.split(os.path.abspath(__file__))[0]+os.sep+CONFIGFILE): # file dir
+        configfile=os.path.split(os.path.abspath(__file__))[0]+os.sep+CONFIGFILE
 
 if args.verbose == True:
     print "ConfigFile: ",configfile
 
-if parser.read(configfile) != None:
+if os.path.isfile(configfile) and parser.read(configfile) != None:
     MIDINAME=ReadConfig('MIDI', 'DeviceName')
     MIDINAME_IN=ReadConfig('MIDI', 'DeviceNameIn')
     MIDINAME_OUT=ReadConfig('MIDI', 'DeviceNameOut')
-    MIDINAME2=ReadConfig('MIDI', 'DeviceName2')
     ADDR=ReadConfig('OSC', 'Address')
     PORT_SRV=ReadConfig('OSC', 'ServerPort','int')
     PORT_CLN=ReadConfig('OSC', 'ClientPort','int')
@@ -550,6 +556,8 @@ def Progress(incremento=127/15):
     """
     global Stat
     global FlipFlop
+    
+    
     if MidiMode == 'BCR':
         sendToBCR(2,1,int(Stat))
         Stat += incremento
@@ -565,14 +573,15 @@ def Progress(incremento=127/15):
             sendToBCR(0,85,FlipFlop*127)
 
     elif MidiMode == 'MCU':
-        midi_out.send_message([0x90,MidiMessages["Rec"] ,Stat]) # Rec
         if Stat == 0: Stat=127
         else:  Stat=0
+        if port_out >= 0: midi_out.send_message([0x90,MidiMessages["Rec"] ,Stat]) # Rec
 
     if do_exit != True:
         threading.Timer(1,Progress,()).start()
     FlipFlop=not FlipFlop
 
+    #if footsy_port >= 0: footsy_out.send_message([0xBE,5,FlipFlop*127])
 
 def parse_messages():
     """
@@ -932,6 +941,13 @@ Midi Channel 16: FCB1010 - voice strip (3) -> FX2 return level
     CC 102 -> /fx/2/par/01" # FX2 time
 """
 def RefreshController():
+    if footsy_port >= 0:
+        for i in range(1,5):
+            if FootsyStatus[0][i-1] == 0: footsy_out.send_message([0xBE,i,127])
+            if FootsyStatus[0][i-1] == 127: footsy_out.send_message([0xBE,i,0])
+        for i in range(6,10):
+            if FootsyStatus[1][i-6] == 0: footsy_out.send_message([0xBE,i,127])
+            if FootsyStatus[1][i-6] == 127: footsy_out.send_message([0xBE,i,0])
     for i in range(1,9):
         if MidiMode == 'BCR':
             if Bank < 2:
@@ -952,37 +968,37 @@ def RefreshController():
             if Bank < 2:
                 sendToMCU(i,Volume[ActiveBus][i+8*Bank-1])
                 #midi_out.send_message([0x90,0x07+i,Solo[i+8*Bank-1]])
-                midi_out.send_message([0x90,MidiMessages["Solo"]+i-1,Solo[i+8*Bank-1]])
+                if port_out >= 0: midi_out.send_message([0x90,MidiMessages["Solo"]+i-1,Solo[i+8*Bank-1]])
                 #midi_out.send_message([0x90,0x0f+i,Mute[i+8*Bank-1]])
-                midi_out.send_message([0x90,MidiMessages["Mute"]+i-1,Mute[i+8*Bank-1]])
+                if port_out >= 0: midi_out.send_message([0x90,MidiMessages["Mute"]+i-1,Mute[i+8*Bank-1]])
             if Bank == 2:
                 if i <= 5:
                     sendToMCU(i,FxReturn[0][i-1])
-                    midi_out.send_message([0x90,MidiMessages["Mute"]+i-1,Mute[i+15]])
+                    if port_out >= 0: midi_out.send_message([0x90,MidiMessages["Mute"]+i-1,Mute[i+15]])
 
     if MidiMode == 'MCU':
         if ActiveBus == 1:
-            midi_out.send_message([0x90,MidiMessages["TrackL"],0])
-            midi_out.send_message([0x90,MidiMessages["TrackR"],127])
+            if port_out >= 0: midi_out.send_message([0x90,MidiMessages["TrackL"],0])
+            if port_out >= 0: midi_out.send_message([0x90,MidiMessages["TrackR"],127])
         elif ActiveBus == 2:
-            midi_out.send_message([0x90,MidiMessages["TrackL"],127])
-            midi_out.send_message([0x90,MidiMessages["TrackR"],0])
+            if port_out >= 0: midi_out.send_message([0x90,MidiMessages["TrackL"],127])
+            if port_out >= 0: midi_out.send_message([0x90,MidiMessages["TrackR"],0])
         else:
-            midi_out.send_message([0x90,MidiMessages["TrackL"],0])
-            midi_out.send_message([0x90,MidiMessages["TrackR"],0])
+            if port_out >= 0: midi_out.send_message([0x90,MidiMessages["TrackL"],0])
+            if port_out >= 0: midi_out.send_message([0x90,MidiMessages["TrackR"],0])
 
         if CurrentFx == 1:
-            midi_out.send_message([0x90,MidiMessages["Prev"],0])
-            midi_out.send_message([0x90,MidiMessages["Next"],0])
+            if port_out >= 0: midi_out.send_message([0x90,MidiMessages["Prev"],0])
+            if port_out >= 0: midi_out.send_message([0x90,MidiMessages["Next"],0])
         if CurrentFx == 2:
-            midi_out.send_message([0x90,MidiMessages["Prev"],127])
-            midi_out.send_message([0x90,MidiMessages["Next"],0])
+            if port_out >= 0: midi_out.send_message([0x90,MidiMessages["Prev"],127])
+            if port_out >= 0: midi_out.send_message([0x90,MidiMessages["Next"],0])
         if CurrentFx == 3:
-            midi_out.send_message([0x90,MidiMessages["Prev"],0])
-            midi_out.send_message([0x90,MidiMessages["Next"],127])
+            if port_out >= 0: midi_out.send_message([0x90,MidiMessages["Prev"],0])
+            if port_out >= 0: midi_out.send_message([0x90,MidiMessages["Next"],127])
         if CurrentFx == 4:
-            midi_out.send_message([0x90,MidiMessages["Prev"],127])
-            midi_out.send_message([0x90,MidiMessages["Next"],127])
+            if port_out >= 0: midi_out.send_message([0x90,MidiMessages["Prev"],127])
+            if port_out >= 0: midi_out.send_message([0x90,MidiMessages["Next"],127])
 ##    if MidiMode == 'MCU':
 ##        if ActiveBus == 0:
 ##            #midi_out.send_message([0x90,0x33,127])
@@ -1039,6 +1055,37 @@ def RefreshControllerfx():
 
     RefreshController()
 
+def FootsyConfigure(cc):
+    if cc <= 4: 
+        status=FootsyStatus[0][cc-1]
+        val=Volume[2+cc][VoiceChannel-1]
+        if status == 0:
+            FxInterpolation[0][cc-1][1]=float(val)/127
+        else:
+            FxInterpolation[0][cc-1][0]=float(val)/127
+
+    else: 
+        status=FootsyStatus[1][cc-5]
+        val=Volume[cc-3][BassChannel-1]
+        if status == 0:
+            FxInterpolation[1][cc-5][1]=float(val)/127
+        else:
+            FxInterpolation[1][cc-5][0]=float(val)/127
+    print "Configure cc %d (status: %d - Val=%f)" % (cc,status,val)
+    FxInterpolationString="[[\n[%f,%f]\n,[%f,%f]\n,[%f,%f]\n,[%f,%f]\n]\n,[[%f,%f]\n,[%f,%f]\n,[%f,%f]\n,[%f,%f]\n]]" % (
+                                                FxInterpolation[0][0][0],FxInterpolation[0][0][1],
+                                                FxInterpolation[0][1][0],FxInterpolation[0][1][1],
+                                                FxInterpolation[0][2][0],FxInterpolation[0][2][1],
+                                                FxInterpolation[0][3][0],FxInterpolation[0][3][1],
+                                                FxInterpolation[1][0][0],FxInterpolation[1][0][1],
+                                                FxInterpolation[1][1][0],FxInterpolation[1][1][1],
+                                                FxInterpolation[1][2][0],FxInterpolation[1][2][1],
+                                                FxInterpolation[1][3][0],FxInterpolation[1][3][1])
+
+    parser.set("OSC2Midi","FxInterpolation",FxInterpolationString)
+    with open(configfile, 'wb') as cf:
+        parser.write(cf)
+    
 def MidiCallback(message, time_stamp):
     """
     MIDI receiver handler callback
@@ -1055,6 +1102,8 @@ def MidiCallback(message, time_stamp):
     global FxReturn
     global ActiveBus
     global do_exit
+    global FootsyStatus
+    global FootsyTimer
 
     cc=0
     val=0
@@ -1125,10 +1174,10 @@ def MidiCallback(message, time_stamp):
             if message[1] == MidiMessages["Stop"] and message[2] == 0x7f:
                 if Shift == 1:
                     Shift=0
-                    midi_out.send_message([0x90,MidiMessages["Stop"],0])
+                    if port_out >= 0: midi_out.send_message([0x90,MidiMessages["Stop"],0])
                 else:
                     Shift=1
-                    midi_out.send_message([0x90,MidiMessages["Stop"],127])
+                    if port_out >= 0: midi_out.send_message([0x90,MidiMessages["Stop"],127])
                 lcd_status()
                 RefreshControllerfx()
 
@@ -1386,16 +1435,38 @@ def MidiCallback(message, time_stamp):
                             ]
                         ]
             """
-        if MidiChannel == 15: # CGfootsy
-            if DebugMIDIrecv > 0:
-                print "CGfootsy!"
-            if cc >= 1 and cc <= 4: #fila inferiore (Voice)
-                address="/ch/%02d/mix/%02d/level" % (VoiceChannel,cc+6) # Send of Voice on Fx1-4
-                interpolation=(FxInterpolation[0][cc-1][0],FxInterpolation[0][cc-1][1])
+        if MidiChannel == 15 and val == 127: # CGfootsy
+            FootsyTimer=time.time()
+        if MidiChannel == 15 and val == 0:
+            FOOTSYTIMEOUT=3
+            if FootsyTimer > 0 and time.time() - FootsyTimer > FOOTSYTIMEOUT:
+                FootsyConfigure(cc)
+            else:
+                if DebugMIDIrecv > 0:
+                    print "CGfootsy!"
+                if cc >= 1 and cc <= 4: #fila inferiore (Voice)
+                    if FootsyStatus[0][cc-1] == 0:
+                        FootsyStatus[0][cc-1]=127
+                        val=0
+                    else:
+                        FootsyStatus[0][cc-1]=0
+                        val=127
+                    address="/ch/%02d/mix/%02d/level" % (VoiceChannel,cc+6) # Send of Voice on Fx1-4
+                    interpolation=(FxInterpolation[0][cc-1][0],FxInterpolation[0][cc-1][1])
+                    Volume[cc+2][VoiceChannel-1]=127*interpolate(float(val),0,127,interpolation[0],interpolation[1])
 
-            if cc >= 6 and cc <=9: # fila superiore (Bass)
-                address="/ch/%02d/mix/%02d/level" % (BassChannel,cc+1) # Send of Voice on Fx1-4
-                interpolation=(FxInterpolation[1][cc-5][0],FxInterpolation[1][cc-5][1])
+                if cc >= 6 and cc <=9: # fila superiore (Bass)
+                    if FootsyStatus[1][cc-6] == 0:
+                        FootsyStatus[1][cc-6]=127
+                        val=0
+                    else:
+                        FootsyStatus[1][cc-6]=0
+                        val=127
+
+                    address="/ch/%02d/mix/%02d/level" % (BassChannel,cc+1) # Send of Voice on Fx1-4
+                    interpolation=(FxInterpolation[1][cc-5][0],FxInterpolation[1][cc-5][1])
+                    Volume[cc-3][BassChannel-1]=127*interpolate(float(val),0,127,interpolation[0],interpolation[1])
+            RefreshController()
 #
 
 
@@ -1423,25 +1494,31 @@ if MIDINAME_IN == "":
 if MIDINAME_OUT == "":
     MIDINAME_OUT=MIDINAME
 
-midi_in=rtmidi.MidiIn()
-port_in=OpenMidiPort(MIDINAME_IN,midi_in,"Input Devices")
+
+#### Midi In ###
+midi_in=[0]*10
+port_in=[0]*10
+index=0
+for i in MIDINAME_IN.split(','):
+    midi_in[index]=rtmidi.MidiIn()
+    port_in[index]=OpenMidiPort(i,midi_in[index],"Input Devices")
+    if port_in[index]  >= 0: 
+        midi_in[index].open_port(port_in[index])
+        midi_in[index].callback = MidiCallback
+    index += 1
+
+#### Midi Out ####
 midi_out=rtmidi.MidiOut()
-port_out=OpenMidiPort(MIDINAME_OUT,midi_out,"Output Devices")
+for i in MIDINAME_OUT.split(','):
+    port_out=OpenMidiPort(i,midi_out,"Output Devices")
+    if port_out  >= 0: 
+        midi_out.open_port(port_out)
+        break # we'll take only the first valid MIDI Out
 
-midi_in.callback = MidiCallback
-
-midi_in.open_port(port_in)
-midi_out.open_port(port_out)
-
-
-# A second midi input device (midiloop) with same callback.
-#       That means I will be able to pilot XR18 from Ableton Live too!
-if MIDINAME2 != "None":
-    midi_in2=rtmidi.MidiIn()
-    port_in2=OpenMidiPort(MIDINAME2,midi_in2,"Input Devices")
-    midi_in2.open_port(port_in2)
-    midi_in2.callback = MidiCallback 
-
+footsy_out=rtmidi.MidiOut()
+footsy_port=OpenMidiPort("Teensy",footsy_out,"Footsy")
+if footsy_port >= 0:
+    footsy_out.open_port(footsy_port)
 
 if args.verbose == True:
     print "====================================="
@@ -1460,6 +1537,7 @@ elif MidiMode == 'MCU':
     #for i in range(0,8): midi_out.send_message([0x90,MidiMessages["Arm"]+i,127])
     #midi_out.send_message([0x90,MidiMessages["Zoom"],127])
     pass
+
 threading.Timer(1,Progress,()).start()
 RefreshController()
 lcd_status()
