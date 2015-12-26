@@ -3,6 +3,7 @@
 
 """
 History:
+    2015-12-26: 0.1.00: completely rewritten translatuion engine using a table (tested only on BCR2000)
     2015-12-25: 0.0.18: Footsy support (configure parameters, persistence)
     2015-12-21: 0.0.17: code cleanup; support for CGfootsy on Midi# 15
     2015-12-11: 0.0.16: argparse, various fixes
@@ -22,7 +23,7 @@ History:
     2015-11-21: 0.0.2: refactoring, configuration file
     2015-11-20: 0.0.1: first working version; FX parameters
 """
-VERSION="0.0.18"
+VERSION="0.1.00"
 
 import argparse
 import rtmidi_python as rtmidi
@@ -42,6 +43,46 @@ import ast
 import string
 if os.name == 'posix' and os.uname()[1] == 'raspberrypi':
     import RPi_I2C_driver
+
+MidiMsg=[]
+OscMsg=[]
+ParIndex=[]
+
+
+def PrepareArray(array):
+    """
+    takes the Userdefined array and fills up three fast-to-decode simple monodimensional arrays
+    """
+    global MidiMsg
+    global OscMsg
+    global ParIndex
+#    print array
+    for item in array:
+        print item
+        MidiMsg.append(item[0])
+        OscMsg.append(item[1])
+        ParIndex.append(item[2])
+#        print "%s - %s - %s" % (item[0],item[1],item[2])
+
+def SearchMidi(val):
+#    print "SearchMidi: ",val
+    if val in MidiMsg:
+        return(MidiMsg.index(val))
+    else:
+        return(-1)
+
+def SearchOsc(val):
+    if val in OscMsg:
+        return (OscMsg.index(val))
+    else:
+        #return((-1,-1))
+        return(-1)
+
+def SearchParam(val):
+    if val in ParIndex:
+        return(ParIndex.index(val))
+    else:
+        return(-1)
 
 def ListMidiPort(midi_port ):
     """
@@ -168,7 +209,13 @@ def sendToBCR(channel,slot,val):
     if MidiMode == 'BCR':
         if channel >= 0 and channel <=3:
             cmd=0xB0+channel
-        if port_out >= 0: midi_out.send_message([cmd,slot,val])
+        else:
+            print "ATTENZIONE: qualcuno sta inviando il CC %d (%d) al MidiChannel %d"%(slot,val,channel)
+        if port_out >= 0: 
+            midi_out.send_message([cmd,slot,val])
+            if DebugMIDIsend > 0:
+                print "sendToBCR: send_message(0x%x,%d,%d)"%(cmd,slot,val)
+
 
 
 def interpolate(value, inMin, inMax, outMin, outMax):
@@ -207,7 +254,7 @@ VoiceChannel=0
 BassChannel=0
 do_exit=False
 BusName=["Master","Bus1","Bus2","Bus3","Bus4","Bus5","Bus6"]
-FootsyStatus=[[127]*4,[127]*4]
+FootsyStatus=[[0]*4,[0]*4]
 FootsyTimer=0
 FxType=[0,0,0,0]
 FxReturn=[ #Fx1, Fx2, Fx3, Fx4, Aux
@@ -215,6 +262,18 @@ FxReturn=[ #Fx1, Fx2, Fx3, Fx4, Aux
             [0]*5, # Bus1
             [0]*5, # Bus2
         ]
+MAIN=0
+BUS1=1
+BUS2=2
+FX1=3
+FX2=4
+FX3=5
+FX4=6
+PAN=7
+MUTE=8
+SOLO=9
+NAME=10
+
 Volume=[ # 16 channels
         [0]*32, # Main LR
         [0]*32, # Bus1
@@ -223,6 +282,10 @@ Volume=[ # 16 channels
         [0]*32, # Fx2
         [0]*32, # Fx3
         [0]*32, # Fx4
+        [0]*32, # Pan
+        [0]*32, # Mute
+        [0]*32, # Solo
+        [""]*32, # Name
        ]
 
 Pan= [0]*32
@@ -372,63 +435,16 @@ def Reload(client,force=False):
         print "NoReload!"
         return
 
-
-    # Here we are asking some values back from XR18 (an OSC message with an address without value send to XR18 triggers an OSC message back from XR18 with the actual value)
-    # Let's start with the Type of effect loaded in the 4 slot available and the return levels.
-    # NB: slot are 1,2,3,4.
-    client.send(OSC.OSCMessage("/lr/config/name")) # Name of the master bus
-    time.sleep(WAITOSC)
-    for i in range(1,7):
-            client.send(OSC.OSCMessage("/bus/%d/config/name" % i)) # Name of the bus
-            time.sleep(WAITOSC)
-    for i in range(1,5):
-        if DebugOSCsend > 0:
-            print "OSCsend: /fx/%d/type" % i
-        client.send(OSC.OSCMessage("/fx/%d/type" % i)) # FX type
-        client.send(OSC.OSCMessage("/rtn/%d/mix/fader" % i)) # FX return level (Master)
-        time.sleep(WAITOSC)
-        client.send(OSC.OSCMessage("/rtn/%d/mix/01/level" % i)) # FX return level (Bus1)
-        time.sleep(WAITOSC)
-        client.send(OSC.OSCMessage("/rtn/%d/mix/02/level" % i)) # FX return level (Bus2)
-        time.sleep(WAITOSC)
-    for i in range(1,17): 
-        # Volume Master
-        client.send(OSC.OSCMessage("/ch/%02d/mix/fader" % i)) # Master LR
-        time.sleep(WAITOSC)
-        client.send(OSC.OSCMessage("/ch/%02d/config/name" % i)) # Name of the channel 
-        time.sleep(WAITOSC)
-        for j in range(7,11): # 7-10 are the FX busses
-            client.send(OSC.OSCMessage("/ch/%02d/mix/%02d/level" % (i,j))) # FX sends
-            time.sleep(WAITOSC)
-
-        # Mute
-        client.send(OSC.OSCMessage("/ch/%02d/mix/on" % i)) # Mute
-        time.sleep(WAITOSC)
-
-        # Pan
-        client.send(OSC.OSCMessage("/ch/%02d/mix/pan" % i)) # Pan
-        time.sleep(WAITOSC)
-
-        #Solo
-        client.send(OSC.OSCMessage("/-stat/solosw/%02d" % i)) # Solo
-        time.sleep(WAITOSC)
-
-        # Send levels for Bus1
-        client.send(OSC.OSCMessage("/ch/%02d/mix/01/level" % i)) # Phones 1 (Bus1)
-        time.sleep(WAITOSC)
-
-        # Send levels for Bus2
-        client.send(OSC.OSCMessage("/ch/%02d/mix/02/level" % i)) # Phones 2 (Bus2)
-        time.sleep(WAITOSC)
-
-    # FX parameters for the currently selected slot.
-    # CurrentFX is the currently selected slot (we can select 1 of 4 different slots with the 4 "User defined" buttons on BCR2000)
-    for j in range(1,5):
-        for i in FxParam[FxType[j-1]]:
-            if DebugOSCsend > 0:
-                print "OSCsend: /fx/%d/par/%02d" % (j,i)
-            client.send(OSC.OSCMessage("/fx/%d/par/%02d" % (j,i))) # FX parameters
-            time.sleep(WAITOSC)
+    for i in Translation:
+        #for j in 1,2,3:
+        #    if i[j] != "":
+            if i[1] != "":
+                if DebugOSCsend > 0:
+                    #print "OSCsend: ",i[j]
+                    print "OSCsend: ",i[1]
+                #client.send(OSC.OSCMessage(i[j]))
+                client.send(OSC.OSCMessage(i[1]))
+                time.sleep(WAITOSC)
 
 def request_notifications(client):
     """
@@ -508,10 +524,12 @@ def request_notifications(client):
 
 def lcd_status(MidiChannel=0, cc=0, val=0):
     if ActiveBus == 0:
-        BUS="Master: %s" % BusName[0]
+        #BUS="Master: %s" % BusName[0]
+        BUS="Master: %s" % Volume[NAME][21]
     for Bus in range(1,7):
         if ActiveBus == Bus:
-            BUS="Bus%d: %s" %(Bus, BusName[Bus])
+            #BUS="Bus%d: %s" %(Bus, BusName[Bus])
+            BUS="Bus%d: %s" %(Bus, Volume[NAME][16+Bus])
     if os.name == 'posix' and os.uname()[1] == 'raspberrypi':
         lcd=lcd_init()
         if Shift == 1:
@@ -543,6 +561,7 @@ def status():
     print "Debug: OSCsend=%d, OSCrecv=%d, MIDIsend=%d, MIDIrecv=%d" % (DebugOSCsend,DebugOSCrecv,DebugMIDIsend,DebugMIDIrecv)
     print "NoReload=%d" % NoReload
     print "VoiceChannel=%d" % VoiceChannel
+    print "BassChannel=%d" % BassChannel
     print "CurrentFx=%d" % CurrentFx
     print "Bank=%d" % Bank
     print "ActiveBus=%d" % AciveBus
@@ -616,276 +635,85 @@ def parse_messages():
             val=0
             if tags == 'f':
                 val=int(data[0]*127)
-            if tags == 'i':
-                val=int(data[0])
+            elif tags == 'i':
+                val=127*int(data[0])
+            elif tags == 's':
+                val=data[0]
 
-            # FX type (es.: "/fx/1/type")
-            if re.match("/fx/./type",addr):
-                slot=int(addr[4]) # addr[4] is the FX (1 to 4)
-                FxType[slot-1]=data[0] 
-                if DebugOSCrecv > 0:
-                    print "Found FX %d set to %d" % (slot,FxType[slot-1])
-
-            # We need to know which channel is the Main Vocal, so we can map the Expression Pedal (on FCB1010)
-            # to the right Send for Fx.
-            elif re.match("/ch/../config/name",addr):
-                channel=int(addr[4:6])
-                name=data[0]
-                if DebugOSCrecv > 0: print "Channel %d is named %s" %(channel,name)
-                if name.lower() in ("voce","voce1","vox","vox1","voice","voice1"):
-                    VoiceChannel=channel
-                    if DebugOSCrecv > 0: print "VoiceChannel=%d" % channel
-                if name.lower() in ("basso","bass"):
-                    BassChannel=channel
-                    if DebugOSCrecv > 0: print "BassChannel=%d" % channel
-            elif re.match("/bus/./config/name",addr):
-                channel=int(addr[5])
-                name=data[0]
-                if DebugOSCrecv > 0: print "Bus %d is named %s" %(channel,name)
-                if BusName[channel] != name:
-                    BusName[channel]=name
-                    if channel == ActiveBus:
-                        lcd_status()
-            elif re.match("/lr/config/name",addr):
-                name=data[0]
-                if DebugOSCrecv > 0: print "Master Bus is named %s" %(name)
-                if BusName[0] != name:
-                    BusName[0]=name 
-                    if ActiveBus == 0:
-                        lcd_status()
-
-            elif re.match("/ch/../mix/../level",addr): # Bus Sends
-            # The busses 7-10 are the Fx Return Busses
-                  val=int(data[0]*127)
-                  channel=int(addr[4:6])
-                  bus=int(addr[11:13])
-                  if channel >= 1 and channel <= 16:
-                      if bus == 1:
-                        Volume[1][channel-1]=val
-                      if bus == 2:
-                        Volume[2][channel-1]=val
-                      if bus >=7 and bus <= 10:
-                          Volume[bus-4][channel-1]=val
-                  if channel >= (1+8*Bank) and channel <= (8+8*Bank):
-                      if bus == 1:
-                          if MidiMode == 'BCR':
-                              sendToBCR(1,channel-8*Bank,val)
-                          elif MidiMode == 'MCU':
-                              if ActiveBus == bus:
-                                  sendToMCU(channel-8*Bank,val)
-
-                      elif bus == 2:
-                          if MidiMode == 'BCR':
-                              sendToBCR(3,channel-8*Bank,val)
-                          elif MidiMode == 'MCU':
-                              if ActiveBus == bus:
-                                  sendToMCU(channel-8*Bank,val)
-                      if bus >=7 and bus <= 10:
-                          if MidiMode == 'BCR':
-                              if bus == CurrentFx+6:
-                                  sendToBCR(0,16+channel-8*Bank,val)
-                              elif MidiMode == 'MCU':
-                                  if ActiveBus == bus:
-                                      sendToMCU(channel-8*Bank,val)
-                      else:
-                        pass # At the moment, the other busses are not mapped...
-
-                  if DebugOSCrecv > 0:
-                      print "Bus %d, Channel %d, Val=%d" % (bus,channel,val)
-
-            # FX parameters (es.: "/fx/1/par/06")
-            elif re.match("/fx/./par/..",addr): 
-                slot=int(addr[4])
-                par=int(addr[10:12])
-
+            index=SearchOsc(addr)
+            if index >= 0:
+                if Translation[index][0] != "":
+                    remotebank=int(Translation[index][0].split(',')[0])
+                    MidiChannel=int(Translation[index][0].split(',')[1])
+                    MidiCC=int(Translation[index][0].split(',')[2])
+                else:
+                    MidiChannel=-1
+                    MidiCC=-1
+                Bus=int(eval(Translation[index][2].split(',')[0]))
+                Channel=int (Translation[index][2].split(',')[1])
+                Min=int(eval(Translation[index][2].split(',')[2]))
+                Max=int(eval(Translation[index][2].split(',')[3]))
                 if tags == 'f':
-                    val=int(data[0]*127)
-                if tags == 'i':
-                    val=int(data[0])
-
-                if par <= len(FxParVal):
-                    FxParVal[slot-1][par-1][0]=tags
-                    FxParVal[slot-1][par-1][1]=val
-                if slot == CurrentFx: #  here we are
-                    index=2+FxParam[FxType[slot-1]].index(par)-6*Shift
-                    if index >=2 and index <= 7:
-                        # ie: slot=2, FxType[1]=11, CurrentFx=2, FxParam[11]=[1,4,5,6,7,9,2], par=9 -> send(0xB2,6,val)
-                        try:
-                            if MidiMode == 'BCR':
-                                sendToBCR(2,index,val) #MIDI ch. 3 NB: in my BCR fx params starts from CC2 (CC1 is faulty!)
-                            elif MidiMode == 'MCU':
-                                if ActiveBus == bus:
-                                    sendToMCU(index,val)
-                        except:
-                            pass
-
-                if DebugOSCrecv > 0:
-                    print "FX: current=%d - slot=%d - par=%d - val=%f" %(CurrentFx,slot,par,data[0])
-
-            # Fx Return Levels (Master)
-            elif re.match("/rtn/./mix/fader",addr):
-                slot=int(addr[5])
-                val=int(data[0]*127)
-                FxReturn[0][slot-1]=val
-
-                if DebugOSCrecv > 0:
-                    print "FX return: current=%d - slot=%d - val=%f" %(CurrentFx,slot,val)
-
-                if Bank == 2:
+                    val=interpolate(int(data[0]*127),0,127,Min,Max)
+                elif tags == 'i':
+                    val=interpolate(127*int(data[0]),0,127,Min,Max)
+                elif tags == 's':
+                    val=data[0]
+                Volume[Bus][Channel]=val
+                if DebugOSCrecv: 
+                    if tags == "s":
+                        print "Translation:(%d:%d) send CC %d on Midi# %d and set Volume[%d][%d] to %s" %(remotebank,index,MidiChannel,MidiCC,Bus,Channel,val)
+                    else:
+                        print "Translation:(%d:%d) send CC %d on Midi# %d and set Volume[%d][%d] to %d" %(remotebank,index,MidiChannel,MidiCC,Bus,Channel,val)
+                if MidiChannel != -1 and MidiCC != -1:
                     if MidiMode == 'BCR':
-                        sendToBCR(0,slot,val)
+                        if Bank == remotebank:
+                            if DebugMIDIsend > 0:
+                                print "Send MIDI: %d,%d,%d"%(MidiChannel,MidiCC,val)
+                            sendToBCR(MidiChannel-1,MidiCC,val)
                     elif MidiMode == 'MCU':
-                        if ActiveBus == BUS_FX_RETURN:
-                            sendToMCU(channel,val)
+                        if ActiveBus == Bus:
+                            if Bank == remotebank:
+                                sendToMCU(MidiCC,val)
+                RefreshController()
 
-            # Aux Return Levels (Master)
-            elif re.match("/rtn/aux/mix/fader",addr):
-                slot=5
-                val=int(data[0]*127)
-                FxReturn[0][slot-1]=val
+            else:
+                # FX type (es.: "/fx/1/type")
+                if re.match("/fx/./type",addr):
+                    slot=int(addr[4]) # addr[4] is the FX (1 to 4)
+                    FxType[slot-1]=data[0] 
+                    if DebugOSCrecv > 0:
+                        print "Found FX %d set to %d" % (slot,FxType[slot-1])
 
-                if DebugOSCrecv > 0:
-                    print "Aux return: current=%d - slot=%d - val=%f" %(CurrentFx,slot,val)
+                # FX parameters (es.: "/fx/1/par/06")
+                if re.match("/fx/./par/..",addr): 
+                    slot=int(addr[4])
+                    par=int(addr[10:12])
 
-                if Bank == 2:
-                    if MidiMode == 'BCR':
-                        sendToBCR(0,slot,val)
-                    elif MidiMode == 'MCU':
-                        if ActiveBus == BUS_AUX_RETURN:
-                            sendToMCU(channel,val)
+                    if tags == 'f':
+                        val=int(data[0]*127)
+                    if tags == 'i':
+                        val=int(data[0])
 
+                    if par <= len(FxParVal):
+                        FxParVal[slot-1][par-1][0]=tags
+                        FxParVal[slot-1][par-1][1]=val
+                    if slot == CurrentFx: #  here we are
+                        index=2+FxParam[FxType[slot-1]].index(par)-6*Shift
+                        if index >=2 and index <= 7:
+                            # ie: slot=2, FxType[1]=11, CurrentFx=2, FxParam[11]=[1,4,5,6,7,9,2], par=9 -> send(0xB2,6,val)
+                            try:
+                                if MidiMode == 'BCR':
+                                    sendToBCR(2,index,val) #MIDI ch. 3 NB: in my BCR fx params starts from CC2 (CC1 is faulty!)
+                                elif MidiMode == 'MCU':
+                                    if ActiveBus == bus:
+                                        sendToMCU(index,val)
+                            except:
+                                pass
 
-
-            # Fx Return Levels
-            elif re.match("/rtn/./mix/../level",addr):
-                slot=int(addr[5])
-                val=int(data[0]*127)
-                bus=int(addr[11:13])
-                if bus >= 1 and bus <= 2:
-                    FxReturn[bus][slot-1]=val
-
-                if DebugOSCrecv > 0:
-                    print "FX return: current=%d - slot=%d - bus=%d - val=%f" %(CurrentFx,slot,bus,val)
-
-                if Bank == 2:
-                    if MidiMode == 'BCR':
-                        if bus==1:
-                            sendToBCR(1,slot,val)
-                        if bus==2:
-                            sendToBCR(3,slot,val)
-                    elif MidiMode == 'MCU':
-                        if ActiveBus == bus:
-                            sendToMCU(slot,val)
-
-
-            # Aux Return Levels
-            elif re.match("/rtn/aux/mix/../level",addr):
-                slot=5
-                val=int(data[0]*127)
-                bus=int(addr[11:13])
-                FxReturn[bus][slot-1]=val
-
-                if DebugOSCrecv > 0:
-                    print "FX return: current=%d - slot=%d - bus=%d - val=%f" %(CurrentFx,slot,bus,val)
-
-                if Bank == 2:
-                    if MidiMode == 'BCR':
-                        if bus==1:
-                            sendToBCR(1,slot,val)
-                        if bus==2:
-                            sendToBCR(3,slot,val)
-                    elif MidiMode == 'MCU':
-                        if ActiveBus == bus:
-                            sendToMCU(slot,val)
-
-
-            # Mixer Channels (es: "/ch/01/mix/03")
-            elif re.match("/ch/../mix/fader",addr): # Volume Master
-                channel=int(addr[4:6])
-                val=int(data[0]*127)
-                if channel >= 1 and channel <= 16:
-                    Volume[0][channel-1]=val
-                if Bank < 2:
-                    if channel >= (1+8*Bank) and channel <= (8+8*Bank):
-                        if DebugOSCrecv > 0:
-                           print "Channel %d, Val=%d (Bank=%d)" % (channel,val,Bank)
-                        if MidiMode == 'BCR':
-                            sendToBCR(0,channel-8*Bank,val)
-                        elif MidiMode == 'MCU':
-                            if ActiveBus == BUS_MASTER:
-                                sendToMCU(channel-8*Bank,val)
-
-            elif re.match("/ch/../mix/pan",addr): # Pan Master
-                channel=int(addr[4:6])
-                val=int(data[0]*127)
-                if channel >= 1 and channel <= 16:
-                    Pan[channel-1]=val
-                if Bank < 2:
-                    if channel >= (1+8*Bank) and channel <= (8+8*Bank):
-                        if DebugOSCrecv > 0:
-                           print "Channel %d, Val=%d" % (channel,val)
-                        if MidiMode == 'BCR':
-                            sendToBCR(0,8+channel-8*Bank,val) #MIDI ch. 1
-                        elif MidiMode == 'MCU':
-                            pass # Not Yet Implemented
-
-            elif re.match("/rtn/./mix/on",addr):
-                   val=int(data[0])
-                   channel=int(addr[5])
-                   if channel >= 1 and channel <= 5:
-                       if val == 0:
-                           Mute[channel-1+16]=127
-                       else:
-                           Mute[channel-1+16]=0
-                   if Bank == 2:
-                       if channel >= 1 and channel <= 5:
-                           if int(data[0]) == 0:
-                               if MidiMode == 'BCR':
-                                   sendToBCR(0,72+channel,127) #MIDI ch. 1
-                               elif MidiMode == 'MCU':
-                                   RefreshController()
-                           else:
-                               if MidiMode == 'BCR':
-                                   sendToBCR(0,72+channel,0) #MIDI ch. 1
-                               elif MidiMode == 'MCU':
-                                   RefreshController()
+                    if DebugOSCrecv > 0:
+                        print "FX: current=%d - slot=%d - par=%d - val=%f" %(CurrentFx,slot,par,data[0])
  
-            elif re.match("/ch/../mix/on",addr):
-                   val=int(data[0])
-                   channel=int(addr[4:6])
-                   if channel >= 1 and channel <= 16:
-                       if val == 0:
-                           Mute[channel-1]=127
-                       else:
-                           Mute[channel-1]=0
-                   if Bank < 2:
-                       if channel >= (1+8*Bank) and channel <= (8+8*Bank):
-                           if int(data[0]) == 0:
-                               if MidiMode == 'BCR':
-                                   sendToBCR(0,72+channel-8*Bank,127) #MIDI ch. 1
-                               elif MidiMode == 'MCU':
-                                   RefreshController()
-                           else:
-                               if MidiMode == 'BCR':
-                                   sendToBCR(0,72+channel-8*Bank,0) #MIDI ch. 1
-                               elif MidiMode == 'MCU':
-                                   RefreshController()
-
-            elif re.match("/-stat/solosw/..",addr):
-                channel=int(addr[14:16])
-                val=int(data[0])
-                if channel >= 1 and channel <= 16:
-                    Solo[channel-1]=val*127
-                if Bank < 2:
-                    if channel >= (1+8*Bank) and channel <= (8+8*Bank):
-                        if DebugOSCrecv > 0:
-                            print "Solo channel %d = %d" % (channel,val)
-                        if MidiMode == 'BCR':
-                            sendToBCR(0,64+channel-8*Bank,val*127) #MIDI ch. 1, CC 65 - 73
-                        elif MidiMode == 'MCU':
-                            RefreshController()
-
-
     # Setup OSC server & client
     server = OSC.OSCServer(("", PORT_SRV))
     server.addMsgHandler("default", msg_handler) # msg_handler() will receive ALL the OSC messages ("default" address)
@@ -941,41 +769,36 @@ Midi Channel 16: FCB1010 - voice strip (3) -> FX2 return level
     CC 102 -> /fx/2/par/01" # FX2 time
 """
 def RefreshController():
+    global VoiceChannel
+    global BassChannel
+
     if footsy_port >= 0:
         for i in range(1,5):
-            if FootsyStatus[0][i-1] == 0: footsy_out.send_message([0xBE,i,127])
-            if FootsyStatus[0][i-1] == 127: footsy_out.send_message([0xBE,i,0])
+            footsy_out.send_message([0xBE,i,FootsyStatus[0][i-1]])
         for i in range(6,10):
-            if FootsyStatus[1][i-6] == 0: footsy_out.send_message([0xBE,i,127])
-            if FootsyStatus[1][i-6] == 127: footsy_out.send_message([0xBE,i,0])
-    for i in range(1,9):
-        if MidiMode == 'BCR':
-            if Bank < 2:
-                sendToBCR(0,i,Volume[0][i+8*Bank-1]) #MIDI ch. 1
-                sendToBCR(1,i,Volume[1][i+8*Bank-1]) #MIDI ch. 2
-                sendToBCR(3,i,Volume[2][i+8*Bank-1]) #MIDI ch. 4
-                sendToBCR(0,8+i,Pan[i+8*Bank-1]) #MIDI ch. 1
-                sendToBCR(0,16+i,Volume[2+CurrentFx][i+8*Bank-1]) #MIDI ch. 1
-                sendToBCR(0,72+i,Mute[i+8*Bank-1]) #MIDI ch. 1
-                sendToBCR(0,64+i,Solo[i+8*Bank-1]) #MIDI ch. 1, CC 65 - 73
-            if Bank == 2:
-                if i <= 5:
-                    sendToBCR(0,i,FxReturn[0][i-1])
-                    sendToBCR(1,i,FxReturn[1][i-1])
-                    sendToBCR(3,i,FxReturn[2][i-1])
-                    sendToBCR(0,72+i,Mute[i+15]) #MIDI ch. 1
-        elif MidiMode == 'MCU':
-            if Bank < 2:
-                sendToMCU(i,Volume[ActiveBus][i+8*Bank-1])
-                #midi_out.send_message([0x90,0x07+i,Solo[i+8*Bank-1]])
-                if port_out >= 0: midi_out.send_message([0x90,MidiMessages["Solo"]+i-1,Solo[i+8*Bank-1]])
-                #midi_out.send_message([0x90,0x0f+i,Mute[i+8*Bank-1]])
-                if port_out >= 0: midi_out.send_message([0x90,MidiMessages["Mute"]+i-1,Mute[i+8*Bank-1]])
-            if Bank == 2:
-                if i <= 5:
-                    sendToMCU(i,FxReturn[0][i-1])
-                    if port_out >= 0: midi_out.send_message([0x90,MidiMessages["Mute"]+i-1,Mute[i+15]])
+            footsy_out.send_message([0xBE,i,FootsyStatus[1][i-6]])
+    
+    for i in Translation:
+        if i[0] != "":
+            bank=int(i[0].split(',')[0])
+            chan=int(i[0].split(',')[1])
+            cc=int(i[0].split(',')[2])
+            bus=int(eval(i[2].split(',')[0]))
+            pos=int(i[2].split(',')[1])
+            if int(bank) == Bank:
+                if MidiMode == 'BCR':
+                    sendToBCR(chan-1,cc,Volume[bus][pos])
+                elif MidiMode == 'MCU':
+                    if bus == ActiveBus:
+                        sendToMCU(cc,Volume[bus][pos])
 
+    for index,name in enumerate(Volume[NAME]):
+        if name.lower() in ("basso","bass"):
+            BassChannel=index+1
+            #print "BassChannel=",BassChannel
+        if name.lower() in ("voce","voce1","vox","vox1","voice","voice1"):
+            VoiceChannel=index+1
+            #print "VoiceChannel=",VoiceChannel
     if MidiMode == 'MCU':
         if ActiveBus == 1:
             if port_out >= 0: midi_out.send_message([0x90,MidiMessages["TrackL"],0])
@@ -999,39 +822,6 @@ def RefreshController():
         if CurrentFx == 4:
             if port_out >= 0: midi_out.send_message([0x90,MidiMessages["Prev"],127])
             if port_out >= 0: midi_out.send_message([0x90,MidiMessages["Next"],127])
-##    if MidiMode == 'MCU':
-##        if ActiveBus == 0:
-##            #midi_out.send_message([0x90,0x33,127])
-##            midi_out.send_message([0x90,MidiMessages["Mixer"],127])
-##        else:
-##            #midi_out.send_message([0x90,0x33,0])
-##            midi_out.send_message([0x90,MidiMessages["Mixer"],0])
-##        for i in range(1,9):
-##            if i == ActiveBus:
-##                val=127
-##            else:
-##                val=0
-##            #midi_out.send_message([0x90,0x17+i,val])
-##            midi_out.send_message([0x90,MidiMessages["Sel"]+i-1,val])
-
-
-
-
-##    if MidiMode == 'MCU':
-##        if ActiveBus == 0:
-##            #midi_out.send_message([0x90,0x33,127])
-##            midi_out.send_message([0x90,MidiMessages["Mixer"],127])
-##        else:
-##            #midi_out.send_message([0x90,0x33,0])
-##            midi_out.send_message([0x90,MidiMessages["Mixer"],0])
-##        for i in range(1,9):
-##            if i == ActiveBus:
-##                val=127
-##            else:
-##                val=0
-##            #midi_out.send_message([0x90,0x17+i,val])
-##            midi_out.send_message([0x90,MidiMessages["Sel"]+i-1,val])
-
 
 def Dump():
     print "******************************"
@@ -1059,18 +849,18 @@ def FootsyConfigure(cc):
     if cc <= 4: 
         status=FootsyStatus[0][cc-1]
         val=Volume[2+cc][VoiceChannel-1]
-        if status == 0:
+        if status == 127:
             FxInterpolation[0][cc-1][1]=float(val)/127
         else:
             FxInterpolation[0][cc-1][0]=float(val)/127
 
     else: 
-        status=FootsyStatus[1][cc-5]
+        status=FootsyStatus[1][cc-6]
         val=Volume[cc-3][BassChannel-1]
-        if status == 0:
-            FxInterpolation[1][cc-5][1]=float(val)/127
+        if status == 127:
+            FxInterpolation[1][cc-6][1]=float(val)/127
         else:
-            FxInterpolation[1][cc-5][0]=float(val)/127
+            FxInterpolation[1][cc-6][0]=float(val)/127
     print "Configure cc %d (status: %d - Val=%f)" % (cc,status,val)
     FxInterpolationString="[[\n[%f,%f]\n,[%f,%f]\n,[%f,%f]\n,[%f,%f]\n]\n,[[%f,%f]\n,[%f,%f]\n,[%f,%f]\n,[%f,%f]\n]]" % (
                                                 FxInterpolation[0][0][0],FxInterpolation[0][0][1],
@@ -1081,7 +871,7 @@ def FootsyConfigure(cc):
                                                 FxInterpolation[1][1][0],FxInterpolation[1][1][1],
                                                 FxInterpolation[1][2][0],FxInterpolation[1][2][1],
                                                 FxInterpolation[1][3][0],FxInterpolation[1][3][1])
-
+    print FxInterpolationString
     parser.set("OSC2Midi","FxInterpolation",FxInterpolationString)
     with open(configfile, 'wb') as cf:
         parser.write(cf)
@@ -1117,23 +907,10 @@ def MidiCallback(message, time_stamp):
 ##### iControlPro ####
     if MidiMode == 'MCU':
         if message[0] == 0x90:
-            #if message[1] >= 0x18 and message[1] <= 0x1f: # Sel Button
-##            if message[1] >= MidiMessages["Sel"] and message[1] <= MidiMessages["Sel"]+8: # Sel Button
-                #ActiveBus=message[1]-0x17
-##                ActiveBus=message[1]-MidiMessages["Sel"]+1
-##                lcd_status()
-##                RefreshController()
-            #if message[1] == 0x33:
-##            if message[1] == MidiMessages["Mixer"]:
-##                ActiveBus=0
-##                lcd_status()
-##                RefreshController()
-
             if message[1] == MidiMessages["Rec"] and message[2] == 0x7f:
                 if Shift == 0:
                     do_exit=True
                     if os.name == 'posix' and os.uname()[1] == 'raspberrypi':
-#                                               1234567890123456
                         lcd.lcd_display_string("Exiting...      ",1)
                         lcd.lcd_display_string("Bye             ",2)
                     time.sleep(1)
@@ -1141,7 +918,6 @@ def MidiCallback(message, time_stamp):
                     exit()
                 else:
                     if os.name == 'posix' and os.uname()[1] == 'raspberrypi':
-#                                               1234567890123456
                         lcd.lcd_display_string("Halting...      ",1)
                         lcd.lcd_display_string("Bye             ",2)
                         time.sleep(1)
@@ -1291,182 +1067,127 @@ def MidiCallback(message, time_stamp):
             print "Ch.",MidiChannel," #",cc," =",val
         address=""
 
+        index=SearchMidi("%d,%d,%d"%(Bank,MidiChannel,cc))
+        if index>= 0:
+            address=Translation[index][1]
+            if address != "":
+                Bus=int(eval(Translation[index][2].split(',')[0]))
+                Channel=int (Translation[index][2].split(',')[1])
+                Min=int(eval(Translation[index][2].split(',')[2]))
+                Max=int(eval(Translation[index][2].split(',')[3]))
+                Volume[Bus][Channel]=val
+                val=interpolate(val, 0, 127, Min, Max)
+                if DebugMIDIrecv: print "Translation:(%d) send %s and set Volume[%d][%d] to %s" %(index,address,Bus,Channel,val)
+        else:
+
 ####  MIDI Channel 1 ####
-        if MidiChannel == 1: # Master LR Volume
-            if cc >= 1 and cc <= 8:
-                if Bank < 2:
-                    address="/ch/%02d/mix/fader" % (cc+8*Bank)
-                    Volume[0][cc+8*Bank-1]=val
-                if Bank == 2:
-                    if cc < 5:
-                        address="/rtn/%d/mix/fader" % cc
-                    if cc == 5:
-                        address="/rtn/aux/mix/fader"
-                    FxReturn[0][cc-1]=val
+            if MidiChannel == 1: # Master LR Volume
+                # 81,82,83,84 are the User Defined buttons: they select the current FX
+                if cc >= 81 and cc <=84:
+                    CurrentFx=cc-80
 
-            if Bank < 2:
-                if cc >= 9 and cc <= 16: # Group 2 of Encoders: Pan
-                    address="/ch/%02d/mix/pan" % (cc-8+8*Bank)
-                    Pan[cc-8+8*Bank-1]=val
-                if cc >= 17 and cc <= 24:
-                    address="/ch/%02d/mix/%02d/level" %(cc-16+8*Bank,6+CurrentFx)
-                    Volume[2+CurrentFx][cc-16+8*Bank]=val
-                if cc >= 65 and cc <= 72: # first row buttons: Solo
-                    address="/-stat/solosw/%02d" % (cc-64+8*Bank)
-                    Solo[cc-64+8*Bank-1]=val
-                elif cc >= 73 and cc <= 80: # second row buttons: Mute
-                    address="/ch/%02d/mix/on" % (cc-72+8*Bank)
-                    if val > 0: val=0
-                    else: val=127
-                    Mute[cc-72+8*Bank-1]=val
+                    # these buttons should be exclusively selectable (selecting one deselect the others)
+                    if MidiMode == 'BCR':
+                        for i in range(81,85):
+                            if i == cc:
+                                sendToBCR(0,i,127) #MIDI ch. 1
+                                if DebugMIDIrecv > 1:
+                                    print "MIDI Send 0xB0,%d,127" %i
+                            else:
+                                sendToBCR(0,i,0) #MIDI ch. 1
+                                if DebugMIDIrecv > 1:
+                                    print "MIDI Send 0xB0,%d,0" %i
+                    if DebugMIDIrecv > 0:
+                        lcd_status()
+                        print "CurrentFx=%d" % CurrentFx
 
-            # 81,82,83,84 are the User Defined buttons: they select the current FX
-            if cc >= 81 and cc <=84:
-                CurrentFx=cc-80
+                    if val == 127: # press
+                        oscsend("/fx/%d/type" % CurrentFx) # FX
+                        Shift=1
+                    else: # release
+                        Shift=0
+                    RefreshControllerfx()
+                    for i in FxParam[FxType[CurrentFx-1]]:
+                        oscsend("/fx/%d/par/%02d" % (CurrentFx,i)) # FX parameters request
+                        time.sleep(WAITOSC)
 
-                # these buttons should be exclusively selectable (selecting one deselect the others)
-                if MidiMode == 'BCR':
-                    for i in range(81,85):
-                        if i == cc:
-                            sendToBCR(0,i,127) #MIDI ch. 1
-                            if DebugMIDIrecv > 1:
-                                print "MIDI Send 0xB0,%d,127" %i
-                        else:
-                            sendToBCR(0,i,0) #MIDI ch. 1
-                            if DebugMIDIrecv > 1:
-                                print "MIDI Send 0xB0,%d,0" %i
-                if DebugMIDIrecv > 0:
+                if cc == 85: # Bank!
+                    Bank += 1
+                    if Bank > 2:
+                        Bank=0
                     lcd_status()
-                    print "CurrentFx=%d" % CurrentFx
 
-                if val == 127: # press
-                    oscsend("/fx/%d/type" % CurrentFx) # FX
-                    Shift=1
-                else: # release
-                    Shift=0
-                RefreshControllerfx()
-                for i in FxParam[FxType[CurrentFx-1]]:
-                    oscsend("/fx/%d/par/%02d" % (CurrentFx,i)) # FX parameters request
-                    time.sleep(WAITOSC)
-
-            if cc == 85: # Bank!
-                Bank += 1
-                if Bank > 2:
-                    Bank=0
-                lcd_status()
-
-                RefreshController()
+                    RefreshController()
 
 
-
-####  MIDI Channel 2 ####
-        if MidiChannel == 2: # Livelli Bus1
-            if cc >= 1 and cc <= 8:
-                if Bank < 2:
-                    address="/ch/%02d/mix/01/level" % (cc+8*Bank)
-                    Volume[1][cc+8*Bank-1]=val
-                if Bank == 2:
-                    if cc < 5:
-                        address="/rtn/%d/mix/01/level" % cc
-                    if cc == 5:
-                        address="/rtn/aux/mix/01/level"
-                    FxReturn[1][cc-1]=val
 
 
 ####  MIDI Channel 3 ####
-        if MidiChannel == 3: # Parametri FX corrente
-           if cc == 1:
-                  print "Faulty Controller!"
-           if cc >= 2 and cc <= 7:
-                par=FxParam[FxType[CurrentFx-1]][cc-2+6*Shift]
-                address="/fx/%d/par/%02d" %(CurrentFx,par) #NB: FxType[CurrentFX-1] is the Parameters List of the currently selected FX slot
-                                                                                       # cc-2 is the index in the array we are changing
-                # ie: if Type is 11, the row is [1,4,5,6,7,9,2]. If CC is 3, we take the parameter at offset "1" (CC-2), that is "4"
-                FxParVal[CurrentFx-1][par-1][1]=val
-           if cc == 8:
-               # TO BE REALLOCATED!!
-               pass
-
-
-
-####  MIDI Channel 4 ####
-        if MidiChannel == 4: # Livelli Bus2
-            if cc >= 1 and cc <= 8:
-                if Bank < 2:
-                    address="/ch/%02d/mix/02/level" % (cc+8*Bank)
-                    Volume[2][cc+8*Bank-1]=val
-                if Bank == 2:
-                    FxReturn[2][cc-1]=val
-                    if cc < 5:
-                        address="/rtn/%d/mix/01/level" % cc
-                    if cc == 5:
-                        address="/rtn/aux/mix/01/level"
+            if MidiChannel == 3: # Parametri FX corrente
+               if cc == 1:
+                      print "Faulty Controller!"
+               if cc >= 2 and cc <= 7:
+                    par=FxParam[FxType[CurrentFx-1]][cc-2+6*Shift]
+                    address="/fx/%d/par/%02d" %(CurrentFx,par) #NB: FxType[CurrentFX-1] is the Parameters List of the currently selected FX slot
+                                                                                           # cc-2 is the index in the array we are changing
+                    # ie: if Type is 11, the row is [1,4,5,6,7,9,2]. If CC is 3, we take the parameter at offset "1" (CC-2), that is "4"
+                    FxParVal[CurrentFx-1][par-1][1]=val
+               if cc == 8:
+                   # TO BE REALLOCATED!!
+                   pass
 
 
 ####  MIDI Channel 16 ####
-        if MidiChannel == 16: # FCB1010
-            if DebugMIDIrecv > 0:
-                print "FCB1010!"
-            if cc == 101: # expression A
-                if DebugMIDIrecv > 1:
-                    print "Exp A"
-                address="/ch/%02d/mix/08/level" % VoiceChannel# voce -> FX2 # *** QUESTO E' DA RIVEDERE!! ***
-                interpolation=(0.2,0.8)
+            if MidiChannel == 16: # FCB1010
+                if DebugMIDIrecv > 0:
+                    print "FCB1010!"
+                if cc == 101: # expression A
+                    if DebugMIDIrecv > 1:
+                        print "Exp A"
+                    address="/ch/%02d/mix/08/level" % VoiceChannel# voce -> FX2 # *** QUESTO E' DA RIVEDERE!! ***
+                    interpolation=(0.2,0.8)
 
-            if cc == 102: # expression B
-                if DebugMIDIrecv > 1:
-                    print "Exp B"
-                address="/fx/2/par/01" # FX2 time
+                if cc == 102: # expression B
+                    if DebugMIDIrecv > 1:
+                        print "Exp B"
+                    address="/fx/2/par/01" # FX2 time
 
 ####   MIDI Channel 15 (CG footsy)  ####
-            """
-            FxInterpolation=[
-                            [ # Voice Channel
-                                [0.0,1.0], # Fx1
-                                [0.0,1.0], # Fx2
-                                [0.0,1.0], # Fx3
-                                [0.0,1.0]  # Fx4
-                            ],
-                            [ # Bass Channel
-                                [0.0,1.0], # Fx1
-                                [0.0,1.0], # Fx2
-                                [0.0,1.0], # Fx3
-                                [0.0,1.0]  # Fx4
-                            ]
-                        ]
-            """
-        if MidiChannel == 15 and val == 127: # CGfootsy
-            FootsyTimer=time.time()
-        if MidiChannel == 15 and val == 0:
-            FOOTSYTIMEOUT=3
-            if FootsyTimer > 0 and time.time() - FootsyTimer > FOOTSYTIMEOUT:
-                FootsyConfigure(cc)
-            else:
-                if DebugMIDIrecv > 0:
-                    print "CGfootsy!"
-                if cc >= 1 and cc <= 4: #fila inferiore (Voice)
-                    if FootsyStatus[0][cc-1] == 0:
-                        FootsyStatus[0][cc-1]=127
-                        val=0
-                    else:
-                        FootsyStatus[0][cc-1]=0
-                        val=127
-                    address="/ch/%02d/mix/%02d/level" % (VoiceChannel,cc+6) # Send of Voice on Fx1-4
-                    interpolation=(FxInterpolation[0][cc-1][0],FxInterpolation[0][cc-1][1])
-                    Volume[cc+2][VoiceChannel-1]=127*interpolate(float(val),0,127,interpolation[0],interpolation[1])
+            if MidiChannel == 15 and val == 127: # CGfootsy
+                FootsyTimer=time.time()
+            if MidiChannel == 15 and val == 0:
+                FOOTSYTIMEOUT=3
+                if FootsyTimer > 0 and time.time() - FootsyTimer > FOOTSYTIMEOUT:
+                    FootsyConfigure(cc)
+                    FootsyTimer=0
+                else:
+                    FootsyTimer=0
+                    if DebugMIDIrecv > 0:
+                        print "CGfootsy!"
+                    if cc >= 1 and cc <= 4: #fila inferiore (Voice)
+                        if FootsyStatus[0][cc-1] == 0:
+                            FootsyStatus[0][cc-1]=127
+                            val=127
+                        else:
+                            FootsyStatus[0][cc-1]=0
+                            val=0
+                        address="/ch/%02d/mix/%02d/level" % (VoiceChannel,cc+6) # Send of Voice on Fx1-4
+                        interpolation=(FxInterpolation[0][cc-1][0],FxInterpolation[0][cc-1][1])
+                        Volume[cc+2][VoiceChannel-1]=127*interpolate(float(val),0,127,interpolation[0],interpolation[1])
+                        print "Footsy status for cc %d is %s" %(cc, FootsyStatus[0][cc-1])
 
-                if cc >= 6 and cc <=9: # fila superiore (Bass)
-                    if FootsyStatus[1][cc-6] == 0:
-                        FootsyStatus[1][cc-6]=127
-                        val=0
-                    else:
-                        FootsyStatus[1][cc-6]=0
-                        val=127
-
-                    address="/ch/%02d/mix/%02d/level" % (BassChannel,cc+1) # Send of Voice on Fx1-4
-                    interpolation=(FxInterpolation[1][cc-5][0],FxInterpolation[1][cc-5][1])
-                    Volume[cc-3][BassChannel-1]=127*interpolate(float(val),0,127,interpolation[0],interpolation[1])
-            RefreshController()
+                    if cc >= 6 and cc <=9: # fila superiore (Bass)
+                        if FootsyStatus[1][cc-6] == 0:
+                            FootsyStatus[1][cc-6]=127
+                            val=127
+                        else:
+                            FootsyStatus[1][cc-6]=0
+                            val=0
+                        address="/ch/%02d/mix/%02d/level" % (BassChannel,cc+1) # Send of Voice on Fx1-4
+                        interpolation=(FxInterpolation[1][cc-5][0],FxInterpolation[1][cc-5][1])
+                        Volume[cc-3][BassChannel-1]=127*interpolate(float(val),0,127,interpolation[0],interpolation[1])
+                        print "Footsy status for cc %d is %s" %(cc, FootsyStatus[1][cc-6])
+                RefreshController()
 #
 
 
@@ -1538,6 +1259,7 @@ elif MidiMode == 'MCU':
     #midi_out.send_message([0x90,MidiMessages["Zoom"],127])
     pass
 
+PrepareArray(Translation)
 threading.Timer(1,Progress,()).start()
 RefreshController()
 lcd_status()
